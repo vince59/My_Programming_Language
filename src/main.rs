@@ -4,6 +4,8 @@
 
 mod lexer;
 mod parser;
+mod grammar;
+
 use std::{env, fs, path::PathBuf, process};
 use lexer::Lexer;
 use parser::Parser;
@@ -17,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let src_main_code = fs::read_to_string(&main_src_file)?;
     let lex = Lexer::new(main_src_file, src_main_code);
-    let _p = Parser::new(lex);
+    let p = Parser::new(lex)?;
+    p.parse_main_program();
     Ok(())
 }
