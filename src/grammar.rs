@@ -2,7 +2,7 @@
 // My Programming Language
 // all the keywords, operators ...
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub enum Token {
     Import,
     Fn,
