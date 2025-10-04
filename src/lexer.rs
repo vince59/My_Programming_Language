@@ -2,24 +2,25 @@
 // My Programming Language
 // lexer to read the language token and keyword
 
-pub struct Lexer<'a> {
-    src_code: &'a str,   // source code
+use std::path::PathBuf;
+
+pub struct Lexer {
+    file_name: PathBuf,  // source file name
+    src_code: String,    // source code
     i: usize,            // index byte
     line: usize,         // current line source code
     col: usize,          // current column source code
-    file_name: &'a str,  // source file name
 }
 
+impl Lexer {
 
-impl<'a> Lexer<'a> {
-
-    pub fn new(file_name: &'a str, src_code: &'a str) -> Self {
+    pub fn new(file_name: impl Into<PathBuf>, src_code: impl Into<String>) -> Self {
         Self {
-            src_code,
+            src_code: src_code.into(),
             i: 0,
             line: 1,
             col: 1,
-            file_name,
+            file_name: file_name.into(),
         }
     }
 
