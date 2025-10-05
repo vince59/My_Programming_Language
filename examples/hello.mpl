@@ -1,5 +1,5 @@
-import "lib\utils.gfr"
-import "lib\unit.gfr"
+import "lib\utils.mpl"
+import "lib\unit.mpl"
 
 main() {
   print("Hello from mpl !")

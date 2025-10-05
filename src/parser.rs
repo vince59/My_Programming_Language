@@ -15,6 +15,13 @@ pub enum Stadment {
 
 #[derive(Debug)]
 pub struct Program {
+    pub functions: Vec<Function>,
+    pub main_program: MainProgram,
+}
+
+
+#[derive(Debug)]
+pub struct MainProgram {
     pub imports: Vec<String>,
     pub functions: Vec<Function>,
     pub main: Function,
@@ -84,14 +91,19 @@ impl Parser {
         Ok(())
     }
 
+    // library ::= [ functions ]
+    pub fn parse_library(&mut self) -> Result<Vec<Function>, ParseError> {
+        Ok(self.parse_functions()?)
+    }
+
     // main_program ::= [ imports ]
     //                  [ functions ]
     //                  main_function
-    pub fn parse_main_program(&mut self) -> Result<Program, ParseError> {
+    pub fn parse_main_program(&mut self) -> Result<MainProgram, ParseError> {
         let imports = self.parse_imports()?;
         let functions = self.parse_functions()?;
         let main = self.parse_main_function()?;
-        Ok(Program {
+        Ok(MainProgram {
             imports,
             functions,
             main,
