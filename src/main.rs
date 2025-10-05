@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let src_main_code = fs::read_to_string(&main_src_file)?;
     let lex = Lexer::new(main_src_file, src_main_code);
     let mut p = Parser::new(lex)?;
-    let imports = p.parse_main_program()?;
-    println!("{:?}", imports); 
+    let program = p.parse_main_program()?;
+    println!("{:?}", program); 
     Ok(())
 }

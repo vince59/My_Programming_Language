@@ -195,7 +195,7 @@ impl Lexer {
                         grammar::KW_CALL => Token::Call,
                         grammar::KW_FN => Token::Fn,
                         grammar::KW_MAIN => Token::Main,
-                        grammar::KW_LOG => Token::Log,
+                        grammar::KW_PRINT => Token::Print,
                         _ => Token::Ident(id.to_string()), // if not it is an ident
                     },
                     self.pos.clone(),
