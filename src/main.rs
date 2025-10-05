@@ -5,6 +5,7 @@
 mod lexer;
 mod parser;
 mod grammar;
+mod codegen;
 
 use std::{env, fs, path::{Path, PathBuf}, process};
 use lexer::Lexer;
@@ -18,10 +19,10 @@ fn resolve_rel(base_file: &Path, rel: &str) -> PathBuf {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // read main source code given on the command line
     let main_src_file : PathBuf  = env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        eprintln!("Usage : mpl <path to main source code>");
+        eprintln!("Usage : mpl <main.mpl> [out.wat]");
         process::exit(1);
     });
-
+    let wat_path = env::args().nth(3);
     let main_src = fs::read_to_string(&main_src_file)?;
     let lex = Lexer::new(&main_src_file, main_src);
     let mut p = Parser::new(lex)?;
@@ -38,6 +39,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         lib_functions.append(&mut functions);
     }
     let program = Program {main_program,functions:lib_functions};
+
+    // generate wat code
+    let wat_src = codegen::generate_wat(&program);
+
+    let default_out = main_src_file.with_extension("wat");
+    let wat_src_file = wat_path.unwrap_or_else(|| default_out.to_string_lossy().into_owned());
+    fs::write(&wat_src_file, wat_src)?;
     println!("{:?}", program); 
     Ok(())
 }

@@ -2,7 +2,7 @@
 // My Programming Language
 // all the keywords, operators ...
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub enum Token {
     Import,
     Fn,
@@ -20,28 +20,31 @@ pub enum Token {
 }
 
 pub const KW_IMPORT: &str = "import";
-pub const KW_FN:     &str = "fn";
-pub const KW_MAIN:   &str = "main";
-pub const KW_PRINT:    &str = "print";
-pub const KW_CALL:   &str = "call"; 
+pub const KW_FN: &str = "fn";
+pub const KW_MAIN: &str = "main";
+pub const KW_PRINT: &str = "print";
+pub const KW_CALL: &str = "call";
 
-pub const LPAREN:  &str = "(";
-pub const RPAREN:  &str = ")";
-pub const LBRACE:  &str = "{";
-pub const RBRACE:  &str = "}";
-pub const COMMA:   &str = ",";
+pub const LPAREN: &str = "(";
+pub const RPAREN: &str = ")";
+pub const LBRACE: &str = "{";
+pub const RBRACE: &str = "}";
+pub const COMMA: &str = ",";
 
-pub const EOF:   &str = "end of file";
+pub const EOF: &str = "end of file";
 
+// macro to check if current token is the right one and return an error if it's not the case
+// if the token is right one it go to the next token and if necessary deserializes the token to get the enum param
+// ex : Ident(s) get s if current token is Ident
 #[macro_export]
 macro_rules! expect {
-    // --- Avec payload: retourne une valeur possédée (pas de clone) ---
+    // --- With payload
     ($self:ident, $pat:pat => $out:expr, $expected:expr) => {{
         let tok = ::std::mem::replace(&mut $self.token, Token::Eof); // move
         match tok {
             $pat => {
-                let __v = $out;             // ex: s (String)
-                $self.next_token()?;        // avance au token suivant
+                let __v = $out; // ex: s (String)
+                $self.next_token()?; // go to the next token
                 Ok(__v)
             }
             other => {
@@ -50,17 +53,17 @@ macro_rules! expect {
                     expected: $expected,
                     pos: $self.pos.clone(),
                 };
-                $self.token = other;        // restaure l'état
+                $self.token = other; // restores the state
                 Err(err)
             }
         }
     }};
-    // --- Sans payload: juste vérifie et avance, retourne () ---
+    // --- Without payload
     ($self:ident, $pat:pat, $expected:expr) => {{
         let tok = ::std::mem::replace(&mut $self.token, Token::Eof);
         match tok {
             $pat => {
-                $self.next_token()?;        // avance
+                $self.next_token()?; // go to the next token
                 Ok(())
             }
             other => {
@@ -69,7 +72,7 @@ macro_rules! expect {
                     expected: $expected,
                     pos: $self.pos.clone(),
                 };
-                $self.token = other;        // restaure l'état
+                $self.token = other; // restores the state
                 Err(err)
             }
         }
