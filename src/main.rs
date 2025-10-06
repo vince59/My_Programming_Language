@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Usage : mpl <main.mpl> [out.wat]");
         process::exit(1);
     });
-    let wat_path = env::args().nth(3);
+    let wasm_path = env::args().nth(3);
     let main_src = fs::read_to_string(&main_src_file)?;
     let lex = Lexer::new(&main_src_file, main_src);
     let mut p = Parser::new(lex)?;
@@ -40,12 +40,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let program = Program {main_program,functions:lib_functions};
 
-    // generate wat code
-    let wat_src = codegen::generate_wat(&program);
-
-    let default_out = main_src_file.with_extension("wat");
-    let wat_src_file = wat_path.unwrap_or_else(|| default_out.to_string_lossy().into_owned());
-    fs::write(&wat_src_file, wat_src)?;
+    // generate wasm binary code
+    let wasm = codegen::generate_wasm(&program);
+    let default_out = main_src_file.with_extension("wasm");
+    let wasm_file = wasm_path.unwrap_or_else(|| default_out.to_string_lossy().into_owned());
+    std::fs::write(&wasm_file, wasm)?;
     println!("{:?}", program); 
     Ok(())
 }
