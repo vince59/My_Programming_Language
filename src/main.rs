@@ -6,6 +6,7 @@ mod lexer;
 mod parser;
 mod grammar;
 mod codegen;
+mod svg;
 
 use std::{env, fs, path::{Path, PathBuf}, process};
 use lexer::Lexer;

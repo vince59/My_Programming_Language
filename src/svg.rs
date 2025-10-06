@@ -1,7 +1,7 @@
 use crate::parser::Program;
 use wasm_encoder::{
-    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
-    FunctionSection, ImportSection, MemoryType, Module, NameMap, NameSection, TypeSection, ValType,
+    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, Function, FunctionSection,
+    ImportSection, ExportSection, MemoryType, Module, TypeSection, ValType,
 };
 
 pub fn generate_wasm(prog: &Program) -> Vec<u8> {
@@ -70,11 +70,11 @@ pub fn generate_wasm(prog: &Program) -> Vec<u8> {
     let mut f_main = Function::new([]);
     f_main
         .instructions()
-        .i32_const(0) // ptr "Hello from mpl !"
-        .i32_const(16) // len
-        .call(0) // env.log
-        .call(1) // hello_from_unit
-        .call(2) // hello_from_utils
+        .i32_const(0)   // ptr "Hello from mpl !"
+        .i32_const(16)  // len
+        .call(0)        // env.log
+        .call(1)        // hello_from_unit
+        .call(2)        // hello_from_utils
         .end();
     code.function(&f_main);
 
@@ -97,24 +97,6 @@ pub fn generate_wasm(prog: &Program) -> Vec<u8> {
     // Exporter uniquement main (index de fonction = 3)
     exports.export("main", ExportKind::Func, 3);
 
-    let mut names = NameSection::new();
-    // (facultatif) nom du module
-    names.module("mpl-demo");
-    // noms lisibles pour les fonctions (indices wasm)
-    let mut fn_names = NameMap::new();
-    fn_names.append(0, "log");  
-    fn_names.append(1, "hello_from_unit");
-    fn_names.append(2, "hello_from_utils");
-    fn_names.append(3, "main");
-    names.functions(&fn_names);
-
-    let mut type_names = NameMap::new();
-    type_names.append(ty_log as u32, "ty_log_i32_i32_to_void");
-    type_names.append(ty_void as u32, "ty_void_to_void");
-
-    // Active la subsection "type names"
-    names.types(&type_names);
-
     // -------- Assemblage --------
     let mut module = Module::new();
     module.section(&types);
@@ -123,7 +105,6 @@ pub fn generate_wasm(prog: &Program) -> Vec<u8> {
     module.section(&exports);
     module.section(&code);
     module.section(&data);
-    module.section(&names); // ajoute la name section en fin de module
-
+    
     module.finish()
 }
