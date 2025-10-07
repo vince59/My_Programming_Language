@@ -81,7 +81,7 @@ pub fn generate_wasm(prog: &Program) -> Vec<u8> {
     // -------- Données (dans la mémoire importée 0) --------
     let mut data = DataSection::new();
     // Offsets choisis pour ne pas se chevaucher
-    let hello_main = b"Hello from mpl !"; // 16
+    let hello_main: &'static [u8; 16] = b"Hello from mpl !"; // 16
     let hello_unit = b"hello from unit!"; // 16
     let hello_utils = b"hello from utils!"; // 17
 

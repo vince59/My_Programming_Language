@@ -9,7 +9,7 @@ use crate::lexer::{LexError, Lexer, Position};
 
 #[derive(Debug, Clone)]
 pub enum Stadment {
-    Print { str: String },
+    Print { text: String },
     Call { name: String },
 }
 
@@ -197,8 +197,8 @@ impl Parser {
     pub fn parse_print(&mut self) -> Result<Stadment, ParseError> {
         crate::expect!(self, Token::Print, grammar::KW_PRINT)?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
-        let str = crate::expect!(self,Token::Str(s) => s, "a string after `(`")?;
+        let text = crate::expect!(self,Token::Str(s) => s, "a string after `(`")?;
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
-        Ok(Stadment::Print { str })
+        Ok(Stadment::Print { text })
     }
 }

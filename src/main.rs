@@ -11,10 +11,18 @@ mod svg;
 use std::{env, fs, path::{Path, PathBuf}, process};
 use lexer::Lexer;
 use parser::{Parser, Program};
+use codegen::CodeGenerator;
 
 fn resolve_rel(base_file: &Path, rel: &str) -> PathBuf {
     let base_dir = base_file.parent().unwrap_or_else(|| Path::new("."));
     base_dir.join(rel)
+}
+
+fn file_stem_string(p: &Path) -> String {
+    match p.file_stem() {
+        Some(s) => s.to_string_lossy().into_owned(), // gère UTF-8 non valide
+        None => "main".to_string(),
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,9 +49,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         lib_functions.append(&mut functions);
     }
     let program = Program {main_program,functions:lib_functions};
-
+    println!("{:?}", program); 
+    
     // generate wasm binary code
-    let wasm = codegen::generate_wasm(&program);
+    let prog_name = file_stem_string(&main_src_file); 
+    let mut generator = CodeGenerator::new();
+    let wasm = generator.generate_wasm(prog_name,&program);
     let default_wasm = main_src_file.with_extension("wasm");
     let wasm_file = wasm_path.unwrap_or_else(|| default_wasm.to_string_lossy().into_owned());
     std::fs::write(&wasm_file, &wasm)?;

@@ -1,129 +1,186 @@
-use crate::parser::Program;
+use crate::parser::{Program, Stadment, Function as ParserFunction};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, ImportSection, MemoryType, Module, NameMap, NameSection, TypeSection, ValType,
 };
 
-pub fn generate_wasm(prog: &Program) -> Vec<u8> {
-    // -------- Types --------
-    let mut types = TypeSection::new();
+use std::collections::HashMap;
 
-    // indices de types via types.len() avant insertion
-    let ty_log = types.len();
-    types.ty().function([ValType::I32, ValType::I32], []); // (i32,i32)->()
+#[derive(Clone, Copy)]
+struct Blob {
+    ptr: u32,
+    len: u32,
+}
 
-    let ty_void = types.len();
-    types.ty().function([], []); // ()->()
+fn align_up(x: u32, align: u32) -> u32 {
+    if align == 0 {
+        return x;
+    }
+    let m = align - 1;
+    (x + m) & !m
+}
 
-    // -------- Imports --------
-    let mut imports = ImportSection::new();
-    // env.log : func (i32,i32)->()
-    imports.import("env", "log", EntityType::Function(ty_log));
-    // env.memory : memory importée (min 1 page). Pas d'export de mémoire.
-    imports.import(
-        "env",
-        "memory",
-        EntityType::Memory(MemoryType {
-            minimum: 1,
-            maximum: None,
-            memory64: false,
-            shared: false,
-            page_size_log2: None,
-        }),
+fn push_text(
+    data: &mut DataSection,
+    mem_index: u32,
+    cursor: &mut u32,
+    text: &str, // <- accepte &String aussi
+    align: u32,
+) -> Blob {
+    *cursor = align_up(*cursor, align);
+    let ptr = *cursor;
+    // String -> bytes UTF-8
+    let bytes = text.as_bytes();
+    data.active(
+        mem_index,
+        &ConstExpr::i32_const(ptr as i32),
+        bytes.iter().copied(),
     );
+    *cursor += bytes.len() as u32;
+    Blob {
+        ptr,
+        len: bytes.len() as u32,
+    }
+}
 
-    // -------- Fonctions locales --------
-    // Indices de fonctions (imports d'abord) :
-    // 0: env.log     (import)
-    // 1: hello_from_unit     (local)
-    // 2: hello_from_utils    (local)
-    // 3: main                (local)
-    let mut functions = FunctionSection::new();
-    functions.function(ty_void); // hello_from_unit
-    functions.function(ty_void); // hello_from_utils
-    functions.function(ty_void); // main
+pub struct CodeGenerator {
+    types: TypeSection,
+    imports: ImportSection,
+    exports: ExportSection,
+    functions: FunctionSection,
+    names: NameSection,
+    code: CodeSection,
+    data: DataSection,
+    data_idx: u32,
+    fn_names: NameMap,
+    fn_idx: u32,
+    fn_map: HashMap<String, i32>,
+    ty_void: u32
+}
 
-    // -------- Corps des fonctions --------
-    let mut code = CodeSection::new();
+impl CodeGenerator {
+    pub fn new() -> Self {
+        let types = TypeSection::new();
+        let imports = ImportSection::new();
+        let exports = ExportSection::new();
+        let functions = FunctionSection::new();
+        let names = NameSection::new();
+        let code = CodeSection::new();
+        let data = DataSection::new();
+        let data_idx = 0u32;
+        let fn_names = NameMap::new();
+        let fn_idx = 0u32;
+        let fn_map: HashMap<String, i32> = HashMap::new();
+        let ty_void: u32 = 0;
+        Self {
+            types,
+            imports,
+            exports,
+            functions,
+            names,
+            code,
+            data,
+            data_idx,
+            fn_names,
+            fn_idx,
+            fn_map,
+            ty_void
+        }
+    }
 
-    // hello_from_unit(): log(ptr=64, len=16)
-    let mut f_unit = Function::new([]);
-    f_unit
-        .instructions()
-        .i32_const(64)
-        .i32_const(16)
-        .call(0) // env.log
-        .end();
-    code.function(&f_unit);
+pub fn declare_function(&mut self, function: &ParserFunction) {
+        self.fn_names.append(self.fn_idx, &function.name);
+        self.fn_map
+            .insert(function.name.clone(), self.fn_idx as i32);
+        println!("{}",function.name);
+        self.fn_idx += 1;
+    }
 
-    // hello_from_utils(): log(ptr=96, len=17)
-    let mut f_utils = Function::new([]);
-    f_utils
-        .instructions()
-        .i32_const(96)
-        .i32_const(17)
-        .call(0) // env.log
-        .end();
-    code.function(&f_utils);
+    pub fn gen_function(&mut self, function: &ParserFunction) {
+        self.functions.function(self.ty_void);
+        let mut fnc = Function::new([]);
+        let mut instr = fnc.instructions();
+        for stdm in &function.body {
+            match stdm {
+                Stadment::Print { text } => {
+                    let blob = push_text(&mut self.data, 0, &mut self.data_idx, &text, 16);
+                    instr
+                        .i32_const(blob.ptr as i32)
+                        .i32_const(blob.len as i32)
+                        .call(self.fn_map["log"] as u32);
+                }
+                Stadment::Call { name } => {
+                    println!("xxxx {}",name);
+                    instr.call(self.fn_map[name] as u32);
+                }
+            }
+        }
+        instr.end();
+        self.code.function(&fnc);
+    }
 
-    // main(): log "Hello from mpl !" puis appelle unit et utils
-    let mut f_main = Function::new([]);
-    f_main
-        .instructions()
-        .i32_const(0) // ptr "Hello from mpl !"
-        .i32_const(16) // len
-        .call(0) // env.log
-        .call(1) // hello_from_unit
-        .call(2) // hello_from_utils
-        .end();
-    code.function(&f_main);
+    pub fn generate_wasm(&mut self, prog_name: String, prog: &Program) -> Vec<u8> {
+        self.names.module(&prog_name);
 
-    // -------- Données (dans la mémoire importée 0) --------
-    let mut data = DataSection::new();
-    // Offsets choisis pour ne pas se chevaucher
-    let hello_main = b"Hello from mpl !"; // 16
-    let hello_unit = b"hello from unit!"; // 16
-    let hello_utils = b"hello from utils!"; // 17
+        // Common types
+        // void
+        
+        self.types.ty().function([], []); // ()->()
 
-    // place "Hello from mpl !" @ 0
-    data.active(0, &ConstExpr::i32_const(0), hello_main.iter().copied());
-    // place "hello from unit!" @ 64
-    data.active(0, &ConstExpr::i32_const(64), hello_unit.iter().copied());
-    // place "hello from utils!" @ 96
-    data.active(0, &ConstExpr::i32_const(96), hello_utils.iter().copied());
+        // Imported functions from js
+        // env.log(ptr,len) : func (i32,i32)->()
+        let ty_log = self.types.len();
+        self.types.ty().function([ValType::I32, ValType::I32], []); // (i32,i32)->()
+        self.imports
+            .import("env", "log", EntityType::Function(ty_log));
+        self.fn_names.append(self.fn_idx, "log");
+        self.fn_map.insert("log".into(), self.fn_idx as i32);
+        self.fn_idx += 1;
 
-    // -------- Exports --------
-    let mut exports = ExportSection::new();
-    // Exporter uniquement main (index de fonction = 3)
-    exports.export("main", ExportKind::Func, 3);
+        // Imported memory from js
+        self.imports.import(
+            "env",
+            "memory",
+            EntityType::Memory(MemoryType {
+                minimum: 1,
+                maximum: None,
+                memory64: false,
+                shared: false,
+                page_size_log2: None,
+            }),
+        );
 
-    let mut names = NameSection::new();
-    // (facultatif) nom du module
-    names.module("mpl-demo");
-    // noms lisibles pour les fonctions (indices wasm)
-    let mut fn_names = NameMap::new();
-    fn_names.append(0, "log");  
-    fn_names.append(1, "hello_from_unit");
-    fn_names.append(2, "hello_from_utils");
-    fn_names.append(3, "main");
-    names.functions(&fn_names);
+        for function in &prog.functions {
+            self.declare_function(function);
+        }
 
-    let mut type_names = NameMap::new();
-    type_names.append(ty_log as u32, "ty_log_i32_i32_to_void");
-    type_names.append(ty_void as u32, "ty_void_to_void");
+        for function in &prog.main_program.functions {
+            self.declare_function(function);
+        }
 
-    // Active la subsection "type names"
-    names.types(&type_names);
+        self.declare_function(&prog.main_program.main);
 
-    // -------- Assemblage --------
-    let mut module = Module::new();
-    module.section(&types);
-    module.section(&imports);
-    module.section(&functions);
-    module.section(&exports);
-    module.section(&code);
-    module.section(&data);
-    module.section(&names); // ajoute la name section en fin de module
+        for function in &prog.functions {
+            self.gen_function(function);
+        }
 
-    module.finish()
+        for function in &prog.main_program.functions {
+            self.gen_function(function);
+        }
+
+        self.gen_function(&prog.main_program.main);
+
+        self.exports.export("main", ExportKind::Func, 3);
+
+        // -------- Assemblage --------
+        let mut module = Module::new();
+        module.section(&self.types);
+        module.section(&self.imports);
+        module.section(&self.functions);
+        module.section(&self.exports);
+        module.section(&self.code);
+        module.section(&self.data);
+        module.section(&self.names); // ajoute la name section en fin de module
+        module.finish()
+    }
 }

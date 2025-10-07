@@ -16,3 +16,4 @@ target
 # wasm binary
 bin
 *.wat
+*.wasm
