@@ -130,6 +130,18 @@ impl Lexer {
         if self.try_take(grammar::COMMA) {
             return Some(Token::Comma);
         }
+        if self.try_take(grammar::PLUS) {
+            return Some(Token::Plus);
+        }
+        if self.try_take(grammar::MINUS) {
+            return Some(Token::Minus);
+        }
+        if self.try_take(grammar::STAR) {
+            return Some(Token::Star);
+        }
+        if self.try_take(grammar::SLASH) {
+            return Some(Token::Slash);
+        }
         None
     }
 
@@ -149,6 +161,18 @@ impl Lexer {
             message: "incomplete string (\" missing)".into(),
             pos: self.pos.clone(),
         })
+    }
+
+    fn read_integer(&mut self) -> (& str, usize, usize) {
+        let s = self.i;
+        while let Some(b) = self.peek() {
+            if (b'0'..=b'9').contains(&b) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+        (&self.src_code[s..self.i], s, self.i)
     }
 
     // ident can start with a upper or lower case letter or underscore
@@ -196,10 +220,14 @@ impl Lexer {
                         grammar::KW_FN => Token::Fn,
                         grammar::KW_MAIN => Token::Main,
                         grammar::KW_PRINT => Token::Print,
+                        grammar::KW_NUM_CAST => Token::NumCast,
                         _ => Token::Ident(id.to_string()), // if not it is an ident
                     },
                     self.pos.clone(),
                 ));
+            }
+            if (b'0'..=b'9').contains(&b){
+                let (n,_,_)=self.read_integer(); return Ok((Token::Integer(n.to_string()),self.pos.clone()));
             }
         }
 

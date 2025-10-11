@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         lib_functions.append(&mut functions);
     }
     let program = Program {main_program,functions:lib_functions};
-
+ 
     // generate wasm binary code
     let prog_name = file_stem_string(&main_src_file); 
     let mut generator = CodeGenerator::new();
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wasm_file = wat_path.unwrap_or_else(|| default_wat.to_string_lossy().into_owned());
 
     fs::write(&wasm_file, wat)?;
-
+    
     println!("{:?}", program); 
     Ok(())
 }

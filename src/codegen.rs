@@ -44,15 +44,11 @@ fn push_text(
 }
 
 pub struct CodeGenerator {
-    types: TypeSection,
-    imports: ImportSection,
-    exports: ExportSection,
+    fn_names: NameMap,
     functions: FunctionSection,
-    names: NameSection,
     code: CodeSection,
     data: DataSection,
     data_idx: u32,
-    fn_names: NameMap,
     fn_idx: u32,
     fn_map: HashMap<String, i32>,
     ty_void: u32
@@ -60,28 +56,20 @@ pub struct CodeGenerator {
 
 impl CodeGenerator {
     pub fn new() -> Self {
-        let types = TypeSection::new();
-        let imports = ImportSection::new();
-        let exports = ExportSection::new();
         let functions = FunctionSection::new();
-        let names = NameSection::new();
+        let fn_names = NameMap::new();
         let code = CodeSection::new();
         let data = DataSection::new();
         let data_idx = 0u32;
-        let fn_names = NameMap::new();
         let fn_idx = 0u32;
         let fn_map: HashMap<String, i32> = HashMap::new();
         let ty_void: u32 = 0;
         Self {
-            types,
-            imports,
-            exports,
             functions,
-            names,
+            fn_names,
             code,
             data,
             data_idx,
-            fn_names,
             fn_idx,
             fn_map,
             ty_void
@@ -101,7 +89,7 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
         let mut instr = fnc.instructions();
         for stdm in &function.body {
             match stdm {
-                Stadment::Print { text } => {
+                Stadment::Print { expr } => {
                     let blob = push_text(&mut self.data, 0, &mut self.data_idx, &text, 16);
                     instr
                         .i32_const(blob.ptr as i32)
@@ -118,25 +106,31 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
     }
 
     pub fn generate_wasm(&mut self, prog_name: String, prog: &Program) -> Vec<u8> {
-        self.names.module(&prog_name);
+    let types = TypeSection::new();
+        let mut imports = ImportSection::new();
+        let mut exports = ExportSection::new();
+        let functions = FunctionSection::new();
+        let mut names = NameSection::new();
+        let mut types = TypeSection::new();
+        let ty_void: u32 = 0;
+        names.module(&prog_name);
 
         // Common types
         // void
         
-        self.types.ty().function([], []); // ()->()
+        types.ty().function([], []); // ()->()
 
         // Imported functions from js
         // env.log(ptr,len) : func (i32,i32)->()
-        let ty_log = self.types.len();
-        self.types.ty().function([ValType::I32, ValType::I32], []); // (i32,i32)->()
-        self.imports
-            .import("env", "log", EntityType::Function(ty_log));
+        let ty_log = types.len();
+        types.ty().function([ValType::I32, ValType::I32], []); // (i32,i32)->()
+        imports.import("env", "log", EntityType::Function(ty_log));
         self.fn_names.append(self.fn_idx, "log");
         self.fn_map.insert("log".into(), self.fn_idx as i32);
         self.fn_idx += 1;
 
         // Imported memory from js
-        self.imports.import(
+        imports.import(
             "env",
             "memory",
             EntityType::Memory(MemoryType {
@@ -158,7 +152,7 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
 
         self.declare_function(&prog.main_program.main);
 
-        self.names.functions(&self.fn_names);
+        names.functions(&self.fn_names);
 
         for function in &prog.functions {
             self.gen_function(function);
@@ -170,17 +164,17 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
 
         self.gen_function(&prog.main_program.main);
 
-        self.exports.export("main", ExportKind::Func, 3);
+        exports.export("main", ExportKind::Func, 3);
         
         // -------- Assemblage --------
         let mut module = Module::new();
-        module.section(&self.types);
-        module.section(&self.imports);
+        module.section(&types);
+        module.section(&imports);
         module.section(&self.functions);
-        module.section(&self.exports);
+        module.section(&exports);
         module.section(&self.code);
         module.section(&self.data);
-        module.section(&self.names); // ajoute la name section en fin de module
+        module.section(&names); // ajoute la name section en fin de module
         module.finish()
     }
 }

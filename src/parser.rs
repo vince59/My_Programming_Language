@@ -7,9 +7,29 @@ use std::path::PathBuf;
 use crate::grammar::{self, Token};
 use crate::lexer::{LexError, Lexer, Position};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+#[derive(Debug, Clone)]
+pub enum Expr {
+    Int(String),
+    Str(String),
+    Binary {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    NumToStr(Box<Expr>),
+}
+
 #[derive(Debug, Clone)]
 pub enum Stadment {
-    Print { text: String },
+    Print { expr: Expr },
     Call { name: String },
 }
 
@@ -18,7 +38,6 @@ pub struct Program {
     pub functions: Vec<Function>,
     pub main_program: MainProgram,
 }
-
 
 #[derive(Debug)]
 pub struct MainProgram {
@@ -194,12 +213,103 @@ impl Parser {
         Ok(Stadment::Call { name })
     }
 
-    // print ::=  PRINT '(' str ')'
+    // print ::=  PRINT '(' expr ')'
     pub fn parse_print(&mut self) -> Result<Stadment, ParseError> {
         crate::expect!(self, Token::Print, grammar::KW_PRINT)?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
-        let text = crate::expect!(self,Token::Str(s) => s, "a string after `(`")?;
+
+        let expr = self.parse_expr()?;
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
-        Ok(Stadment::Print { text })
+        Ok(Stadment::Print { expr })
+    }
+
+    // expr ::= additive
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
+        self.parse_additive()
+    }
+
+    // additive ::= multiplicative { ('+' | '-') multiplicative }
+    fn parse_additive(&mut self) -> Result<Expr, ParseError> {
+        let mut node = self.parse_multiplicative()?;
+        loop {
+            let op = match &self.token {
+                Token::Plus => {
+                    self.next_token()?;
+                    BinOp::Add
+                }
+                Token::Minus => {
+                    self.next_token()?;
+                    BinOp::Sub
+                }
+                _ => break,
+            };
+            let rhs = self.parse_multiplicative()?;
+            node = Expr::Binary {
+                op,
+                left: Box::new(node),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(node)
+    }
+
+    // multiplicative ::= primary { ('*' | '/') primary }
+    fn parse_multiplicative(&mut self) -> Result<Expr, ParseError> {
+        let mut node = self.parse_primary()?;
+        loop {
+            let op = match &self.token {
+                Token::Star => {
+                    self.next_token()?;
+                    BinOp::Mul
+                }
+                Token::Slash => {
+                    self.next_token()?;
+                    BinOp::Div
+                }
+                _ => break,
+            };
+            let rhs = self.parse_primary()?;
+            node = Expr::Binary {
+                op,
+                left: Box::new(node),
+                right: Box::new(rhs),
+            };
+        }
+        Ok(node)
+    }
+
+    // primary ::= INT | STR | '(' expr ')' | 'num$' '(' expr ')'
+    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+        // on "peek" le token courant en le clonant
+        let tok = self.token.clone();
+
+        match tok {
+            Token::Integer(n) => {
+                self.next_token()?; 
+                Ok(Expr::Int(n))
+            }
+            Token::Str(s) => {
+                self.next_token()?; 
+                Ok(Expr::Str(s))
+            }
+            Token::LParen => {
+                self.next_token()?; 
+                let e = self.parse_expr()?;
+                crate::expect!(self, Token::RParen, grammar::RPAREN)?; 
+                Ok(e)
+            }
+            Token::NumCast => {
+                self.next_token()?; 
+                crate::expect!(self, Token::LParen, grammar::LPAREN)?; 
+                let inner = self.parse_expr()?;
+                crate::expect!(self, Token::RParen, grammar::RPAREN)?; 
+                Ok(Expr::NumToStr(Box::new(inner)))
+            }
+            _ => Err(ParseError::Unexpected {
+                found: self.token.clone(),
+                expected: "an expression",
+                pos: self.pos.clone(),
+            }),
+        }
     }
 }
