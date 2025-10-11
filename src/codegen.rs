@@ -1,4 +1,4 @@
-use crate::parser::{Program, Stadment, Function as ParserFunction};
+use crate::parser::{Function as ParserFunction, Program, Stadment};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, ImportSection, MemoryType, Module, NameMap, NameSection, TypeSection, ValType,
@@ -51,7 +51,7 @@ pub struct CodeGenerator {
     data_idx: u32,
     fn_idx: u32,
     fn_map: HashMap<String, i32>,
-    ty_void: u32
+    ty_void: u32,
 }
 
 impl CodeGenerator {
@@ -72,11 +72,11 @@ impl CodeGenerator {
             data_idx,
             fn_idx,
             fn_map,
-            ty_void
+            ty_void,
         }
     }
 
-pub fn declare_function(&mut self, function: &ParserFunction) {
+    pub fn declare_function(&mut self, function: &ParserFunction) {
         self.fn_names.append(self.fn_idx, &function.name);
         self.fn_map
             .insert(function.name.clone(), self.fn_idx as i32);
@@ -90,6 +90,7 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
         for stdm in &function.body {
             match stdm {
                 Stadment::Print { expr } => {
+                    let text = "test";
                     let blob = push_text(&mut self.data, 0, &mut self.data_idx, &text, 16);
                     instr
                         .i32_const(blob.ptr as i32)
@@ -106,18 +107,15 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
     }
 
     pub fn generate_wasm(&mut self, prog_name: String, prog: &Program) -> Vec<u8> {
-    let types = TypeSection::new();
         let mut imports = ImportSection::new();
         let mut exports = ExportSection::new();
-        let functions = FunctionSection::new();
         let mut names = NameSection::new();
         let mut types = TypeSection::new();
-        let ty_void: u32 = 0;
         names.module(&prog_name);
 
         // Common types
         // void
-        
+
         types.ty().function([], []); // ()->()
 
         // Imported functions from js
@@ -165,7 +163,7 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
         self.gen_function(&prog.main_program.main);
 
         exports.export("main", ExportKind::Func, 3);
-        
+
         // -------- Assemblage --------
         let mut module = Module::new();
         module.section(&types);
