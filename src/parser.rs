@@ -93,6 +93,7 @@ impl Parser {
 
     // library ::= [ functions ]
     pub fn parse_library(&mut self) -> Result<Vec<Function>, ParseError> {
+        self.next_token()?; // Get the first token
         Ok(self.parse_functions()?)
     }
 
@@ -138,7 +139,7 @@ impl Parser {
     pub fn parse_function(&mut self) -> Result<Function, ParseError> {
         let mut body = Vec::new();
         crate::expect!(self, Token::Fn, grammar::KW_FN)?;
-        let name = crate::expect!(self,Token::Str(s) => s, "a valid function name after `fn`")?;
+        let name = crate::expect!(self,Token::Ident(s) => s, "a valid function name after `fn`")?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
         crate::expect!(self, Token::LBrace, grammar::LBRACE)?;

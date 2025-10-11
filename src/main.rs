@@ -49,8 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         lib_functions.append(&mut functions);
     }
     let program = Program {main_program,functions:lib_functions};
-    println!("{:?}", program); 
-    
+
     // generate wasm binary code
     let prog_name = file_stem_string(&main_src_file); 
     let mut generator = CodeGenerator::new();

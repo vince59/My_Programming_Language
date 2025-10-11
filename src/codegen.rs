@@ -92,7 +92,6 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
         self.fn_names.append(self.fn_idx, &function.name);
         self.fn_map
             .insert(function.name.clone(), self.fn_idx as i32);
-        println!("{}",function.name);
         self.fn_idx += 1;
     }
 
@@ -110,7 +109,6 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
                         .call(self.fn_map["log"] as u32);
                 }
                 Stadment::Call { name } => {
-                    println!("xxxx {}",name);
                     instr.call(self.fn_map[name] as u32);
                 }
             }
@@ -160,6 +158,8 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
 
         self.declare_function(&prog.main_program.main);
 
+        self.names.functions(&self.fn_names);
+
         for function in &prog.functions {
             self.gen_function(function);
         }
@@ -171,7 +171,7 @@ pub fn declare_function(&mut self, function: &ParserFunction) {
         self.gen_function(&prog.main_program.main);
 
         self.exports.export("main", ExportKind::Func, 3);
-
+        
         // -------- Assemblage --------
         let mut module = Module::new();
         module.section(&self.types);
