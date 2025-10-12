@@ -8,3 +8,4 @@ anyhow = "1"
 wasm-encoder = "0.240.0"
 wasmprinter = "0.240.0"
 wasmi = "0.51.1"
+clap = { version = "4", features = ["derive"] }
