@@ -250,26 +250,33 @@ impl CodeGenerator {
             }),
         );
 
+        // declare all functions from the mpl library (import "file.mpl")
         for function in &prog.functions {
             self.declare_function(function);
         }
 
+        // declare all functions from the main program (main.mpl)
         for function in &prog.main_program.functions {
             self.declare_function(function);
         }
 
+        // declare the main function
         self.declare_function(&prog.main_program.main);
 
+        // Insert function names into the name section
         names.functions(&self.fn_names);
 
+        // Generate code for all functions
         for function in &prog.functions {
             self.gen_function(function);
         }
 
+        // Generate code for all functions from the main program
         for function in &prog.main_program.functions {
             self.gen_function(function);
         }
 
+        // Generate code for the main function
         self.gen_function(&prog.main_program.main);
         exports.export(
             "main",
@@ -277,7 +284,7 @@ impl CodeGenerator {
             self.fn_map.len().saturating_sub(1).try_into().unwrap(),
         );
 
-        // -------- Assemblage --------
+        // Finish the module
         let mut module = Module::new();
         module.section(&self.types);
         module.section(&self.imports);

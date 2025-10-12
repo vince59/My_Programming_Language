@@ -163,6 +163,7 @@ impl Lexer {
         })
     }
 
+    /// Read an integer literal
     fn read_integer(&mut self) -> (&str, usize, usize) {
         let s = self.i;
         while let Some(b) = self.peek() {
@@ -185,6 +186,7 @@ impl Lexer {
         Self::is_ident_start(b) || (b'0'..=b'9').contains(&b)
     }
 
+    // read an ident (variable or function name)
     fn read_ident(&mut self) -> (&str, usize, usize) {
         let s = self.i;
         while let Some(b) = self.peek() {
@@ -197,6 +199,7 @@ impl Lexer {
         (&self.src_code[s..self.i], s, self.i) // return the ident, start and end position
     }
 
+    // read the next token
     pub fn next_token(&mut self) -> Result<(Token, Position), LexError> {
         self.skip_ws();
         if self.eof() {
