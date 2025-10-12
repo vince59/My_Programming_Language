@@ -1,6 +1,12 @@
 cls
 @echo on
-del .\js\app.wasm
-del .\js\app.wat
-cargo run -- C:\rust\My_Programming_Language\examples\hello.mpl C:\rust\My_Programming_Language\js\app.wasm C:\rust\My_Programming_Language\js\app.wat
+cls
+del .\target\debug\app.wasm
+del .\target\debug\app.wat
+del .\target\debug\mpl.exe
+del /q .\bin\*.* 
+cargo build
+del .\bin\mpl.exe 
+copy .\target\debug\mpl.exe .\bin\mpl.exe
+.\bin\mpl.exe .\examples\hello.mpl .\bin\app.wasm .\bin\app.wat
 
