@@ -6,7 +6,7 @@ mod lexer;
 mod parser;
 mod grammar;
 mod codegen;
-mod svg;
+mod runner;
 
 use std::{env, fs, path::{Path, PathBuf}, process};
 use lexer::Lexer;
@@ -59,13 +59,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(&wasm_file, &wasm)?;
 
     // generate wat code
-
     let wat = wasmprinter::print_bytes(&wasm).unwrap();
     let default_wat = main_src_file.with_extension("wat");
-    let wasm_file = wat_path.unwrap_or_else(|| default_wat.to_string_lossy().into_owned());
-
-    fs::write(&wasm_file, wat)?;
+    let wat_file = wat_path.unwrap_or_else(|| default_wat.to_string_lossy().into_owned());
+    fs::write(&wat_file, wat)?;
     
+    runner::run_wasm_file(&wasm_file)?;
     println!("{:?}", program); 
     Ok(())
 }

@@ -1,7 +1,8 @@
 use crate::parser::{BinOp, Expr, Function as ParserFunction, Program, Stadment, StrExpr};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
-    FunctionSection, ImportSection, MemoryType, Module, NameMap, NameSection, TypeSection, ValType,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, MemoryType, Module, NameMap,
+    NameSection, TypeSection, ValType,
 };
 
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ struct Blob {
     len: u32,
 }
 
-// Align 'x' up to the next multiple of 'align'
+// Aligne 'x' vers le multiple supérieur de 'align'
 fn align_up(x: u32, align: u32) -> u32 {
     if align == 0 {
         return x;
@@ -21,7 +22,7 @@ fn align_up(x: u32, align: u32) -> u32 {
     (x + m) & !m
 }
 
-// Push a text into the data section at the current cursor position, aligned to 'align' bytes
+// Place du texte dans la DataSection à la position 'cursor', alignée sur 'align'
 fn push_text(
     data: &mut DataSection,
     mem_index: u32,
@@ -31,7 +32,6 @@ fn push_text(
 ) -> Blob {
     *cursor = align_up(*cursor, align);
     let ptr = *cursor;
-    // String -> bytes UTF-8
     let bytes = text.as_bytes();
     data.active(
         mem_index,
@@ -46,45 +46,45 @@ fn push_text(
 }
 
 pub struct CodeGenerator {
-    fn_names: NameMap,
+    // sections
+    types: TypeSection,
+    imports: ImportSection,
     functions: FunctionSection,
     code: CodeSection,
     data: DataSection,
-    data_idx: u32,
+    exports: ExportSection,
+    names: NameSection,
+    globals: GlobalSection,
+
+    // bookkeeping
+    fn_names: NameMap,
     fn_idx: u32,
     fn_map: HashMap<String, i32>,
+    data_idx: u32,
     ty_void: u32,
-    types: TypeSection,
-    imports: ImportSection,
 }
 
 impl CodeGenerator {
     pub fn new() -> Self {
-        let functions = FunctionSection::new();
-        let fn_names = NameMap::new();
-        let code = CodeSection::new();
-        let data = DataSection::new();
-        let data_idx = 0u32;
-        let fn_idx = 0u32;
-        let fn_map: HashMap<String, i32> = HashMap::new();
-        let ty_void: u32 = 0;
-        let types = TypeSection::new();
-        let imports = ImportSection::new();
         Self {
-            functions,
-            fn_names,
-            code,
-            data,
-            data_idx,
-            fn_idx,
-            fn_map,
-            ty_void,
-            types,
-            imports,
+            types: TypeSection::new(),
+            imports: ImportSection::new(),
+            functions: FunctionSection::new(),
+            code: CodeSection::new(),
+            data: DataSection::new(),
+            exports: ExportSection::new(),
+            names: NameSection::new(),
+            globals: GlobalSection::new(),
+
+            fn_names: NameMap::new(),
+            fn_idx: 0,
+            fn_map: HashMap::new(),
+            data_idx: 0,
+            ty_void: 0, // sera 0 après ajout de ()->()
         }
     }
 
-    // Register a function name and its index in the function map
+    // Enregistre un nom de fonction pour la NameSection et map nom -> index
     pub fn declare_function(&mut self, function: &ParserFunction) {
         self.fn_names.append(self.fn_idx, &function.name);
         self.fn_map
@@ -92,7 +92,7 @@ impl CodeGenerator {
         self.fn_idx += 1;
     }
 
-    // Generate code for integer expressions
+    // Expressions arithmétiques (i32)
     pub fn gen_expression(&mut self, expr: &Expr, instr: &mut wasm_encoder::InstructionSink<'_>) {
         match expr {
             Expr::Int(i) => {
@@ -102,24 +102,16 @@ impl CodeGenerator {
                 self.gen_expression(left, instr);
                 self.gen_expression(right, instr);
                 match op {
-                    BinOp::Add => {
-                        instr.i32_add();
-                    }
-                    BinOp::Sub => {
-                        instr.i32_sub();
-                    }
-                    BinOp::Mul => {
-                        instr.i32_mul();
-                    }
-                    BinOp::Div => {
-                        instr.i32_div_u();
-                    }
-                }
+                    BinOp::Add => instr.i32_add(),
+                    BinOp::Sub => instr.i32_sub(),
+                    BinOp::Mul => instr.i32_mul(),
+                    BinOp::Div => instr.i32_div_u(),
+                };
             }
         }
     }
 
-    // Generate code for string expressions, returning a Blob if the result is a new string
+    // Expressions de chaînes (littéral -> Blob; conversion/concat -> valeurs déjà sur la pile)
     fn gen_str_expression(
         &mut self,
         expr: &StrExpr,
@@ -127,52 +119,51 @@ impl CodeGenerator {
     ) -> Option<Blob> {
         match expr {
             StrExpr::Str(s) => {
-                let blob = push_text(&mut self.data, 0, &mut self.data_idx, &s, 16);
+                // place la chaîne dans la mémoire importée via DataSection
+                let blob = push_text(&mut self.data, 0, &mut self.data_idx, s, 16);
                 Some(blob)
             }
             StrExpr::NumToStr(inner) => {
-                let inner = &**inner; // dereference the Box
-                self.gen_expression(inner, instr); // push the number on the stack
-                instr.call(self.fn_map["to_str"] as u32); // convert number to string
+                let inner = &**inner;
+                self.gen_expression(inner, instr); // push n
+                instr.call(self.fn_map["to_str"] as u32); // (i32)->(i32,i32): [ptr,len]
                 None
             }
         }
     }
 
-    // Generate code for print statement
+    // print([...]) -> construit (ptr,len) puis appelle env.log(ptr,len)
     pub fn gen_print(
         &mut self,
         str_expr: &Vec<StrExpr>,
         instr: &mut wasm_encoder::InstructionSink<'_>,
     ) {
         match str_expr.as_slice() {
-            [] => { /* nothing */ }
+            [] => {}
             [only] => {
-                // if there is only one string to print
                 if let Some(blob) = self.gen_str_expression(only, instr) {
-                    instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32); // push ptr,len
+                    instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                 }
             }
             [first, rest @ ..] => {
-                // if there are multiple strings to print
                 if let Some(blob) = self.gen_str_expression(first, instr) {
-                    instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32); // push ptr,len
+                    instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                 }
                 for e in rest {
                     if let Some(blob) = self.gen_str_expression(e, instr) {
-                        instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32); // push ptr,len
+                        instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                     }
-                    instr.call(self.fn_map["concat"] as u32); // concat the two top strings on the stack
+                    // stack: ... s1_ptr s1_len s2_ptr s2_len -> concat -> s_ptr s_len
+                    instr.call(self.fn_map["concat"] as u32);
                 }
             }
         }
         instr.call(self.fn_map["log"] as u32);
     }
 
-    // Generate code for a function
     pub fn gen_function(&mut self, function: &ParserFunction) {
-        self.functions.function(self.ty_void);
-        let mut fnc = Function::new([]);
+        self.functions.function(self.ty_void); // ()->()
+        let mut fnc = Function::new([]); // pas de locals
         let mut instr = fnc.instructions();
         for stdm in &function.body {
             match stdm {
@@ -188,11 +179,11 @@ impl CodeGenerator {
         self.code.function(&fnc);
     }
 
-    // Register an imported function from js
+    // Déclare une fonction importée (module, name, (params)->(results))
     pub fn push_imported_function(
         &mut self,
         module: &str,
-        name: &str, // function name
+        name: &str,
         params: &[ValType],
         results: &[ValType],
     ) {
@@ -207,29 +198,24 @@ impl CodeGenerator {
         self.fn_idx += 1;
     }
 
-    // Generate the complete wasm module
     pub fn generate_wasm(&mut self, prog_name: String, prog: &Program) -> Vec<u8> {
-        let mut exports = ExportSection::new();
-        let mut names = NameSection::new();
+        self.names.module(&prog_name);
 
-        names.module(&prog_name);
+        // 1) Types: ()->() en type 0
+        self.types.ty().function([], []); // () -> ()
+        self.ty_void = 0;
 
-        // Types definition
-        // void
-        self.types.ty().function([], []); // ()->()
-
-        // Imported functions from js
-
-        // env.log(ptr,len) : func (i32,i32)->()
+        // 2) Imports (fonctions + mémoire)
+        // env.log(ptr,len) -> ()
         self.push_imported_function("env", "log", &[ValType::I32, ValType::I32], &[]);
-        // str.to_str(n) : func (i32) -> (i32, i32) : return [ptr, len]
+        // str.to_str(n) -> (ptr,len)
         self.push_imported_function(
             "str",
             "to_str",
             &[ValType::I32],
             &[ValType::I32, ValType::I32],
         );
-        // str.concat(s1_ptr,s1_len,s2_ptr,s2_len) : func (i32,i32,i32,i32) -> (i32, i32) : return [ptr, len]
+        // str.concat(s1_ptr,s1_len,s2_ptr,s2_len) -> (ptr,len)
         self.push_imported_function(
             "str",
             "concat",
@@ -237,7 +223,7 @@ impl CodeGenerator {
             &[ValType::I32, ValType::I32],
         );
 
-        // Imported memory from js
+        // Mémoire importée: env.memory
         self.imports.import(
             "env",
             "memory",
@@ -250,49 +236,61 @@ impl CodeGenerator {
             }),
         );
 
-        // declare all functions from the mpl library (import "file.mpl")
-        for function in &prog.functions {
-            self.declare_function(function);
+        // 3) Déclarations des fonctions (lib + programme + main)
+        for f in &prog.functions {
+            self.declare_function(f);
         }
-
-        // declare all functions from the main program (main.mpl)
-        for function in &prog.main_program.functions {
-            self.declare_function(function);
+        for f in &prog.main_program.functions {
+            self.declare_function(f);
         }
-
-        // declare the main function
         self.declare_function(&prog.main_program.main);
 
-        // Insert function names into the name section
-        names.functions(&self.fn_names);
+        // 4) Noms
+        self.names.functions(&self.fn_names);
 
-        // Generate code for all functions
-        for function in &prog.functions {
-            self.gen_function(function);
+        // 5) Génération du code
+        for f in &prog.functions {
+            self.gen_function(f);
         }
-
-        // Generate code for all functions from the main program
-        for function in &prog.main_program.functions {
-            self.gen_function(function);
+        for f in &prog.main_program.functions {
+            self.gen_function(f);
         }
-
-        // Generate code for the main function
         self.gen_function(&prog.main_program.main);
-        exports.export(
+
+        // 6) Export de main (dernier index déclaré dans notre mapping)
+        self.exports.export(
             "main",
             ExportKind::Func,
             self.fn_map.len().saturating_sub(1).try_into().unwrap(),
         );
 
-        // Finish the module
+        // 7) Global 'heap_ptr' exporté
+        //
+        //     - valeur initiale = fin de la zone de données (alignée à 16)
+        //     - mutable: l'hôte Wasmi mettra à jour ce pointeur (bump allocator)
+        //
+        let heap_start = align_up(self.data_idx, 16);
+        self.globals.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::i32_const(heap_start as i32),
+        );
+        // C’est le premier (et unique) global => index 0.
+        self.exports.export("heap_ptr", ExportKind::Global, 0);
+
+        // 8) Module final
         let mut module = Module::new();
         module.section(&self.types);
         module.section(&self.imports);
         module.section(&self.functions);
-        module.section(&exports);
+        module.section(&self.globals);
+        module.section(&self.exports);
         module.section(&self.code);
         module.section(&self.data);
-        module.section(&names);
+        module.section(&self.names);
         module.finish()
     }
 }
