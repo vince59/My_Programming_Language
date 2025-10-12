@@ -17,19 +17,23 @@ pub enum BinOp {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Int(String),
-    Str(String),
+    Int(i32),
     Binary {
         op: BinOp,
         left: Box<Expr>,
         right: Box<Expr>,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum StrExpr {
+    Str(String),
     NumToStr(Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
 pub enum Stadment {
-    Print { expr: Expr },
+    Print(Vec<StrExpr>),
     Call { name: String },
 }
 
@@ -213,14 +217,41 @@ impl Parser {
         Ok(Stadment::Call { name })
     }
 
-    // print ::=  PRINT '(' expr ')'
+    // print ::=  PRINT '(' str_expr [',' str_expr] ')'
     pub fn parse_print(&mut self) -> Result<Stadment, ParseError> {
         crate::expect!(self, Token::Print, grammar::KW_PRINT)?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
-
-        let expr = self.parse_expr()?;
+        let mut str_expr: Vec<StrExpr> = Vec::new();
+        str_expr.push(self.parse_str_expr()?);
+        while matches!(self.token, Token::Comma) {
+            self.next_token()?;
+            str_expr.push(self.parse_str_expr()?);
+        }
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
-        Ok(Stadment::Print { expr })
+        Ok(Stadment::Print(str_expr))
+    }
+
+    // str_expr ::= str | to_str(expr)
+    fn parse_str_expr(&mut self) -> Result<StrExpr, ParseError> {
+        let tok = self.token.clone();
+        match tok {
+            Token::Str(s) => {
+                self.next_token()?;
+                Ok(StrExpr::Str(s))
+            }
+            Token::ToStr => {
+                self.next_token()?;
+                crate::expect!(self, Token::LParen, grammar::LPAREN)?;
+                let inner = self.parse_expr()?;
+                crate::expect!(self, Token::RParen, grammar::RPAREN)?;
+                Ok(StrExpr::NumToStr(Box::new(inner)))
+            }
+            _ => Err(ParseError::Unexpected {
+                found: self.token.clone(),
+                expected: "a string or to_str(num)",
+                pos: self.pos.clone(),
+            }),
+        }
     }
 
     // expr ::= additive
@@ -278,32 +309,19 @@ impl Parser {
         Ok(node)
     }
 
-    // primary ::= INT | STR | '(' expr ')' | 'num$' '(' expr ')'
+    // primary ::= INT | '(' expr ')'
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
-        // on "peek" le token courant en le clonant
         let tok = self.token.clone();
-
         match tok {
             Token::Integer(n) => {
-                self.next_token()?; 
+                self.next_token()?;
                 Ok(Expr::Int(n))
             }
-            Token::Str(s) => {
-                self.next_token()?; 
-                Ok(Expr::Str(s))
-            }
             Token::LParen => {
-                self.next_token()?; 
+                self.next_token()?;
                 let e = self.parse_expr()?;
-                crate::expect!(self, Token::RParen, grammar::RPAREN)?; 
+                crate::expect!(self, Token::RParen, grammar::RPAREN)?;
                 Ok(e)
-            }
-            Token::NumCast => {
-                self.next_token()?; 
-                crate::expect!(self, Token::LParen, grammar::LPAREN)?; 
-                let inner = self.parse_expr()?;
-                crate::expect!(self, Token::RParen, grammar::RPAREN)?; 
-                Ok(Expr::NumToStr(Box::new(inner)))
             }
             _ => Err(ParseError::Unexpected {
                 found: self.token.clone(),

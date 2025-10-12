@@ -163,7 +163,7 @@ impl Lexer {
         })
     }
 
-    fn read_integer(&mut self) -> (& str, usize, usize) {
+    fn read_integer(&mut self) -> (&str, usize, usize) {
         let s = self.i;
         while let Some(b) = self.peek() {
             if (b'0'..=b'9').contains(&b) {
@@ -220,14 +220,19 @@ impl Lexer {
                         grammar::KW_FN => Token::Fn,
                         grammar::KW_MAIN => Token::Main,
                         grammar::KW_PRINT => Token::Print,
-                        grammar::KW_NUM_CAST => Token::NumCast,
+                        grammar::KW_TO_STR => Token::ToStr,
                         _ => Token::Ident(id.to_string()), // if not it is an ident
                     },
                     self.pos.clone(),
                 ));
             }
-            if (b'0'..=b'9').contains(&b){
-                let (n,_,_)=self.read_integer(); return Ok((Token::Integer(n.to_string()),self.pos.clone()));
+            if (b'0'..=b'9').contains(&b) {
+                let (lexeme, _, _) = self.read_integer();
+                let value: i32 = lexeme.parse::<i32>().map_err(|_| LexError {
+                    message: "incorret integer format".to_string(),
+                    pos: self.pos.clone(),
+                })?;
+                return Ok((Token::Integer(value), self.pos.clone()));
             }
         }
 

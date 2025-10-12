@@ -11,7 +11,8 @@ pub enum Token {
     Call,
     Ident(String),
     Str(String),
-    Integer(String),
+    Integer(i32),
+    ToStr,
     LParen,
     RParen,
     LBrace,
@@ -21,7 +22,6 @@ pub enum Token {
     Minus,
     Star,
     Slash,
-    NumCast,
     Eof,
 }
 
@@ -30,7 +30,7 @@ pub const KW_FN: &str = "fn";
 pub const KW_MAIN: &str = "main";
 pub const KW_PRINT: &str = "print";
 pub const KW_CALL: &str = "call";
-pub const KW_NUM_CAST: &str = "to_str";
+pub const KW_TO_STR: &str = "to_str";
 
 pub const LPAREN: &str = "(";
 pub const RPAREN: &str = ")";
