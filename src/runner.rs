@@ -4,7 +4,7 @@
 
 use anyhow::{anyhow, Result};
 use std::{fs, path::Path, sync::{Arc, Mutex}};
-use wasmi::{Caller, Engine, Func, Linker, Memory, MemoryType, Module, Store, TypedFunc, Val};
+use wasmi::{Caller, Engine, Linker, Memory, MemoryType, Module, Store, TypedFunc, Val};
 
 #[inline]
 fn align_up(x: u32, align: u32) -> u32 {
@@ -24,6 +24,7 @@ fn write_slice(mem: &Memory, caller: &mut Caller<'_, ()>, ptr: u32, data: &[u8])
     mem.write(&mut *caller, ptr as usize, data).expect("mem write");
 }
 
+/// Run a WebAssembly module given as bytes.
 pub fn run_wasm_bytes(wasm_bytes: &[u8]) -> Result<()> {
     let engine = Engine::default();
     let module = Module::new(&engine, wasm_bytes)?;

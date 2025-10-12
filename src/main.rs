@@ -64,6 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wat_file = wat_path.unwrap_or_else(|| default_wat.to_string_lossy().into_owned());
     fs::write(&wat_file, wat)?;
     
+    // run the wasm code
     runner::run_wasm_file(&wasm_file)?;
     println!("{:?}", program); 
     Ok(())

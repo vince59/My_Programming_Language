@@ -86,15 +86,59 @@ impl Lexer {
     }
 
     // skip spaces and other separators
-    fn skip_ws(&mut self) {
-        while let Some(b) = self.peek() {
-            match b {
-                b' ' | b'\t' | b'\r' | b'\n' => {
+    fn skip_ws_and_comments(&mut self) -> Result<(), LexError> {
+        loop {
+            // 1) skip spaces
+            while let Some(b) = self.peek() {
+                match b {
+                    b' ' | b'\t' | b'\r' | b'\n' => {
+                        self.bump();
+                    }
+                    _ => break,
+                }
+            }
+            // 2) comments single line //
+            if self.starts_with("//") {
+                // consume '//'
+                self.bump();
+                self.bump();
+                // advance until '\n' or EOF
+                while let Some(b) = self.peek() {
+                    if b == b'\n' {
+                        break;
+                    }
                     self.bump();
                 }
-                _ => break,
+                // restart the loop (in case there's whitespace + another comment right after)
+                continue;
             }
+            // 3) block comments /* ... */
+            if self.starts_with("/*") {
+                // consume '/*'
+                self.bump();
+                self.bump();
+                // advance until '*/' or EOF
+                while !self.eof() {
+                    if self.starts_with("*/") {
+                        self.bump();
+                        self.bump(); // consume '*/'
+                        break;
+                    }
+                    self.bump(); // consume byte by byte to keep line/col correct
+                }
+                if self.eof() && !self.starts_with("*/") {
+                    return Err(LexError {
+                        message: "block comment not terminated (*/ missing)".into(),
+                        pos: self.pos.clone(),
+                    });
+                }
+                // restart the loop (in case there's whitespace + another comment right after)
+                continue;
+            }
+            // nothing else to skip
+            break;
         }
+        Ok(())
     }
 
     // check if the input starts with the searched token
@@ -201,7 +245,7 @@ impl Lexer {
 
     // read the next token
     pub fn next_token(&mut self) -> Result<(Token, Position), LexError> {
-        self.skip_ws();
+        let _ = self.skip_ws_and_comments();
         if self.eof() {
             return Ok((Token::Eof, self.pos.clone()));
         }
