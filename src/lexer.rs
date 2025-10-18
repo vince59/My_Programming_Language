@@ -207,7 +207,7 @@ impl Lexer {
         })
     }
 
-    /// Read an integer literal
+    // Read an integer literal
     fn read_integer(&mut self) -> (&str, usize, usize) {
         let s = self.i;
         while let Some(b) = self.peek() {
@@ -217,6 +217,36 @@ impl Lexer {
                 break;
             }
         }
+        (&self.src_code[s..self.i], s, self.i)
+    }
+
+    // Read a number: integer or real decimal (e.g., 0, 42, 0.1, 3., 10.000)
+    fn read_number(&mut self) -> (&str, usize, usize) {
+        let s = self.i;
+
+        // Read the integer part (at least one digit)
+        while let Some(b) = self.peek() {
+            if (b'0'..=b'9').contains(&b) {
+                self.bump();
+            } else {
+                break;
+            }
+        }
+
+        // Optional fractional part
+        if self.peek() == Some(b'.') {
+            self.bump(); // consume '.'
+
+            // Read 0 or more digits after the dot (so "3." is valid)
+            while let Some(b) = self.peek() {
+                if (b'0'..=b'9').contains(&b) {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+        }
+
         (&self.src_code[s..self.i], s, self.i)
     }
 
@@ -273,13 +303,34 @@ impl Lexer {
                     self.pos.clone(),
                 ));
             }
+            // Number literal
             if (b'0'..=b'9').contains(&b) {
-                let (lexeme, _, _) = self.read_integer();
-                let value: i32 = lexeme.parse::<i32>().map_err(|_| LexError {
-                    message: "incorret integer format".to_string(),
-                    pos: self.pos.clone(),
-                })?;
-                return Ok((Token::Integer(value), self.pos.clone()));
+                let (lexeme, _, _) = self.read_number();
+
+                if lexeme.contains('.') {
+                    // Support numbers like "123." by adding a trailing zero for parsing
+                    let value_str = if lexeme.ends_with('.') {
+                        let mut s = String::from(lexeme);
+                        s.push('0');
+                        s
+                    } else {
+                        lexeme.to_string()
+                    };
+
+                    let value = value_str.parse::<f64>().map_err(|_| LexError {
+                        message: "invalid real number format".to_string(),
+                        pos: self.pos.clone(),
+                    })?;
+
+                    return Ok((Token::Real(value), self.pos.clone()));
+                } else {
+                    let value = lexeme.parse::<i32>().map_err(|_| LexError {
+                        message: "invalid integer format".to_string(),
+                        pos: self.pos.clone(),
+                    })?;
+
+                    return Ok((Token::Integer(value), self.pos.clone()));
+                }
             }
         }
 

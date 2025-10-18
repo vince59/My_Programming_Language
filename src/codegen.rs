@@ -45,6 +45,11 @@ fn push_text(
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Ty {
+    I32,
+    F64,
+}
 pub struct CodeGenerator {
     // sections
     types: TypeSection,
@@ -92,25 +97,83 @@ impl CodeGenerator {
         self.fn_idx += 1;
     }
 
-    // Expressions arithmétiques (i32)
-    pub fn gen_expression(&mut self, expr: &Expr, instr: &mut wasm_encoder::InstructionSink<'_>) {
+    // Decide the resulting type of an expression.
+    // Rule: if any side is F64, result is F64; otherwise I32.
+    fn infer_type(&self, e: &Expr) -> Ty {
+        match e {
+            Expr::Int(_) => Ty::I32,
+            Expr::Real(_) => Ty::F64,
+            Expr::Binary { left, right, .. } => {
+                let lt = self.infer_type(left);
+                let rt = self.infer_type(right);
+                if lt == Ty::F64 || rt == Ty::F64 {
+                    Ty::F64
+                } else {
+                    Ty::I32
+                }
+            }
+        }
+    }
+
+    // Emit `expr` as `target` type, inserting implicit casts as needed.
+    // Allowed: i32 -> f64 (widen) and f64 -> i32 (narrow via trunc toward zero).
+    fn gen_expression_as(
+        &mut self,
+        expr: &Expr,
+        instr: &mut wasm_encoder::InstructionSink<'_>,
+        target: Ty,
+    ) {
         match expr {
             Expr::Int(i) => {
                 instr.i32_const(*i);
+                if target == Ty::F64 {
+                    // signed i32 -> f64
+                    instr.f64_convert_i32_s();
+                }
+            }
+            Expr::Real(r) => {
+                match target {
+                    Ty::F64 => {
+                        instr.f64_const((*r).into());
+                    }
+                    Ty::I32 => {
+                        // f64 -> i32 (trunc toward zero, traps on NaN or out-of-range)
+                        instr.f64_const((*r).into());
+                        instr.i32_trunc_f64_s();
+                    }
+                }
             }
             Expr::Binary { op, left, right } => {
-                self.gen_expression(left, instr);
-                self.gen_expression(right, instr);
-                match op {
-                    BinOp::Add => instr.i32_add(),
-                    BinOp::Sub => instr.i32_sub(),
-                    BinOp::Mul => instr.i32_mul(),
-                    BinOp::Div => instr.i32_div_u(),
+                let target_ty = target;
+                // make both operands the same target type
+                self.gen_expression_as(left, instr, target_ty);
+                self.gen_expression_as(right, instr, target_ty);
+
+                match (op, target_ty) {
+                    (BinOp::Add, Ty::I32) => instr.i32_add(),
+                    (BinOp::Sub, Ty::I32) => instr.i32_sub(),
+                    (BinOp::Mul, Ty::I32) => instr.i32_mul(),
+                    (BinOp::Div, Ty::I32) => instr.i32_div_s(), // signed division
+
+                    (BinOp::Add, Ty::F64) => instr.f64_add(),
+                    (BinOp::Sub, Ty::F64) => instr.f64_sub(),
+                    (BinOp::Mul, Ty::F64) => instr.f64_mul(),
+                    (BinOp::Div, Ty::F64) => instr.f64_div(),
                 };
             }
         }
     }
 
+    // Public entry: generate code and return the resulting type.
+    pub fn gen_expression(
+        &mut self,
+        expr: &Expr,
+        instr: &mut wasm_encoder::InstructionSink<'_>,
+    ) -> Ty {
+        let target = self.infer_type(expr);
+        self.gen_expression_as(expr, instr, target);
+        target
+    }
     // Expressions de chaînes (littéral -> Blob; conversion/concat -> valeurs déjà sur la pile)
     fn gen_str_expression(
         &mut self,
@@ -124,9 +187,15 @@ impl CodeGenerator {
                 Some(blob)
             }
             StrExpr::NumToStr(inner) => {
-                let inner = &**inner;
-                self.gen_expression(inner, instr); // push n
-                instr.call(self.fn_map["to_str"] as u32); // (i32)->(i32,i32): [ptr,len]
+                let inner = &**inner; 
+                match self.gen_expression(inner, instr) { // push n
+                    Ty::I32 => {
+                        instr.call(self.fn_map["to_str_i32"] as u32); // (i32)->(i32,i32): [ptr,len]
+                    }
+                    Ty::F64 => {
+                        instr.call(self.fn_map["to_str_f64"] as u32); // (f64)->(i32,i32): [ptr,len]
+                    }
+                }
                 None
             }
         }
@@ -208,11 +277,18 @@ impl CodeGenerator {
         // 2) Imports (fonctions + mémoire)
         // env.log(ptr,len) -> ()
         self.push_imported_function("env", "log", &[ValType::I32, ValType::I32], &[]);
-        // str.to_str(n) -> (ptr,len)
+        // str.to_str_i32(n) -> (ptr,len)
         self.push_imported_function(
             "str",
-            "to_str",
+            "to_str_i32",
             &[ValType::I32],
+            &[ValType::I32, ValType::I32],
+        );
+        // str.to_str_f64(n) -> (ptr,len)
+        self.push_imported_function(
+            "str",
+            "to_str_f64",
+            &[ValType::F64],
             &[ValType::I32, ValType::I32],
         );
         // str.concat(s1_ptr,s1_len,s2_ptr,s2_len) -> (ptr,len)

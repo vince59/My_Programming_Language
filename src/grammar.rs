@@ -12,6 +12,7 @@ pub enum Token {
     Ident(String),
     Str(String),
     Integer(i32),
+    Real(f64),
     ToStr,
     LParen,
     RParen,

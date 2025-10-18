@@ -18,6 +18,7 @@ pub enum BinOp {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Int(i32),
+    Real(f64),
     Binary {
         op: BinOp,
         left: Box<Expr>,
@@ -309,13 +310,17 @@ impl Parser {
         Ok(node)
     }
 
-    // primary ::= INT | '(' expr ')'
+    // primary ::= INT | REAL |'(' expr ')'
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let tok = self.token.clone();
         match tok {
             Token::Integer(n) => {
                 self.next_token()?;
                 Ok(Expr::Int(n))
+            }
+            Token::Real(n) => {
+                self.next_token()?;
+                Ok(Expr::Real(n))
             }
             Token::LParen => {
                 self.next_token()?;

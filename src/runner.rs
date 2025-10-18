@@ -2,8 +2,12 @@
 // Provides: env.memory, env.log, str.to_str, str.concat
 // Uses exported mutable global 'heap_ptr' as a bump allocator.
 
-use anyhow::{anyhow, Result};
-use std::{fs, path::Path, sync::{Arc, Mutex}};
+use anyhow::{Result, anyhow};
+use std::{
+    fs,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 use wasmi::{Caller, Engine, Linker, Memory, MemoryType, Module, Store, TypedFunc, Val};
 
 #[inline]
@@ -15,13 +19,15 @@ fn align_up(x: u32, align: u32) -> u32 {
 fn read_slice(mem: &Memory, caller: &mut Caller<'_, ()>, ptr: u32, len: u32) -> Vec<u8> {
     let mut buf = vec![0u8; len as usize];
     // wasmi 0.51: Memory::read takes &Caller (or &mut Caller); both work.
-    mem.read(&*caller, ptr as usize, &mut buf).expect("mem read");
+    mem.read(&*caller, ptr as usize, &mut buf)
+        .expect("mem read");
     buf
 }
 
 /// Write a slice into guest memory.
 fn write_slice(mem: &Memory, caller: &mut Caller<'_, ()>, ptr: u32, data: &[u8]) {
-    mem.write(&mut *caller, ptr as usize, data).expect("mem write");
+    mem.write(&mut *caller, ptr as usize, data)
+        .expect("mem write");
 }
 
 /// Run a WebAssembly module given as bytes.
@@ -35,49 +41,94 @@ pub fn run_wasm_bytes(wasm_bytes: &[u8]) -> Result<()> {
     let mut store = Store::new(&engine, ());
     let mut linker = Linker::new(&engine);
 
-    // 1) Imported memory: env.memory
+    // Imported memory: env.memory
     let memory_ty = MemoryType::new(1, None); // not a Result in 0.51
     let memory = Memory::new(&mut store, memory_ty)?;
     linker.define("env", "memory", memory)?;
 
-    // 2) env.log(ptr: i32, len: i32) -> ()
+    /*  Glue rust functions */
+
+    // env.log(ptr: i32, len: i32) -> ()
     {
         let mem = memory;
-        linker.func_wrap("env", "log", move |mut caller: Caller<'_, ()>, ptr: i32, len: i32| {
-            let bytes = read_slice(&mem, &mut caller, ptr as u32, len as u32);
-            println!("{}", String::from_utf8_lossy(&bytes));
-        })?;
+        linker.func_wrap(
+            "env",
+            "log",
+            move |mut caller: Caller<'_, ()>, ptr: i32, len: i32| {
+                let bytes = read_slice(&mem, &mut caller, ptr as u32, len as u32);
+                println!("{}", String::from_utf8_lossy(&bytes));
+            },
+        )?;
     }
 
-    // 3) str.to_str(n: i32) -> (ptr: i32, len: i32)
+    // str.to_str_i32(n: i32) -> (ptr: i32, len: i32)
     {
         let mem = memory;
         let heap_cell = Arc::clone(&heap_ptr_cell);
-        linker.func_wrap("str", "to_str", move |mut caller: Caller<'_, ()>, n: i32| -> (i32, i32) {
-            let s = n.to_string();
-            let bytes = s.as_bytes();
+        linker.func_wrap(
+            "str",
+            "to_str_i32",
+            move |mut caller: Caller<'_, ()>, n: i32| -> (i32, i32) {
+                let s = n.to_string();
+                let bytes = s.as_bytes();
 
-            let heap = {
-                let guard = heap_cell.lock().unwrap();
-                guard.as_ref().cloned().expect("heap_ptr global not set yet")
-            };
+                let heap = {
+                    let guard = heap_cell.lock().unwrap();
+                    guard
+                        .as_ref()
+                        .cloned()
+                        .expect("heap_ptr global not set yet")
+                };
 
-            let cur = match heap.get(&caller) {
-                Val::I32(v) => v as u32,
-                _ => panic!("heap_ptr must be i32"),
-            };
-            let ptr = cur;
+                let cur = match heap.get(&caller) {
+                    Val::I32(v) => v as u32,
+                    _ => panic!("heap_ptr must be i32"),
+                };
+                let ptr = cur;
 
-            write_slice(&mem, &mut caller, ptr, bytes);
+                write_slice(&mem, &mut caller, ptr, bytes);
 
-            let next = align_up(ptr + bytes.len() as u32, 16);
-            heap.set(&mut caller, Val::I32(next as i32)).expect("set heap_ptr");
+                let next = align_up(ptr + bytes.len() as u32, 16);
+                heap.set(&mut caller, Val::I32(next as i32))
+                    .expect("set heap_ptr");
 
-            (ptr as i32, bytes.len() as i32)
-        })?;
+                (ptr as i32, bytes.len() as i32)
+            },
+        )?;
     }
 
-    // 4) str.concat(s1_ptr,s1_len,s2_ptr,s2_len) -> (ptr,len)
+    // str.to_str_f64(n: f64) -> (ptr: i32, len: i32)
+    {
+        let mem = memory;
+        let heap_cell = Arc::clone(&heap_ptr_cell);
+        linker.func_wrap(
+            "str",
+            "to_str_f64",
+            move |mut caller: Caller<'_, ()>, x: f64| -> (i32, i32) {
+                let s = x.to_string();
+                let bytes = s.as_bytes();
+
+                let heap = {
+                    let g = heap_cell.lock().unwrap();
+                    g.as_ref().cloned().expect("heap_ptr not set")
+                };
+                let cur = match heap.get(&caller) {
+                    Val::I32(v) => v as u32,
+                    _ => panic!("heap_ptr i32"),
+                };
+                let ptr = cur;
+
+                write_slice(&mem, &mut caller, ptr, bytes);
+                let next = align_up(ptr + bytes.len() as u32, 16);
+                heap.set(&mut caller, Val::I32(next as i32))
+                    .expect("set heap_ptr");
+
+                (ptr as i32, bytes.len() as i32)
+            },
+        )?;
+    }
+
+    // str.concat(s1_ptr,s1_len,s2_ptr,s2_len) -> (ptr,len)
     {
         let mem = memory;
         let heap_cell = Arc::clone(&heap_ptr_cell);
@@ -90,7 +141,10 @@ pub fn run_wasm_bytes(wasm_bytes: &[u8]) -> Result<()> {
 
                 let heap = {
                     let guard = heap_cell.lock().unwrap();
-                    guard.as_ref().cloned().expect("heap_ptr global not set yet")
+                    guard
+                        .as_ref()
+                        .cloned()
+                        .expect("heap_ptr global not set yet")
                 };
 
                 let cur = match heap.get(&caller) {
@@ -104,7 +158,8 @@ pub fn run_wasm_bytes(wasm_bytes: &[u8]) -> Result<()> {
 
                 let total = (b1.len() + b2.len()) as u32;
                 let next = align_up(ptr + total, 16);
-                heap.set(&mut caller, Val::I32(next as i32)).expect("set heap_ptr");
+                heap.set(&mut caller, Val::I32(next as i32))
+                    .expect("set heap_ptr");
 
                 (ptr as i32, total as i32)
             },
