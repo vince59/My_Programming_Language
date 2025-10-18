@@ -52,33 +52,50 @@ pub const EOF: &str = "end of file";
 // ex : Ident(s) get s if current token is Ident
 #[macro_export]
 macro_rules! expect {
-    // --- With payload
+    // --- With payload: Ok((out, pos))
     ($self:ident, $pat:pat => $out:expr, $expected:expr) => {{
-        let tok = ::std::mem::replace(&mut $self.token, Token::Eof); // move
+        // Move the current token out to match on it, keep a snapshot of its position.
+        let tok = ::std::mem::replace(&mut $self.token, Token::Eof);
+        let pos_snapshot = $self.pos.clone(); // position of the consumed token
+
         match tok {
             $pat => {
-                let __v = $out; // ex: s (String)
-                $self.next_token()?; // go to the next token
-                Ok(__v)
+                // Bind the payload (e.g. an identifier String)
+                let __v = $out;
+
+                // Advance to the next token after successful match
+                $self.next_token()?;
+
+                // Return both the extracted value and the position of the consumed token
+                Ok((__v, pos_snapshot))
             }
             other => {
+                // Build a precise error using the current position
                 let err = ParseError::Unexpected {
                     found: other.clone(),
                     expected: $expected,
                     pos: $self.pos.clone(),
                 };
-                $self.token = other; // restores the state
+
+                // Restore the token to keep parser state consistent
+                $self.token = other;
+
                 Err(err)
             }
         }
     }};
-    // --- Without payload
+    // --- Without payload: Ok(pos)
     ($self:ident, $pat:pat, $expected:expr) => {{
+        // Same as above, but we only care about the position
         let tok = ::std::mem::replace(&mut $self.token, Token::Eof);
+        let pos_snapshot = $self.pos.clone();
+
         match tok {
             $pat => {
-                $self.next_token()?; // go to the next token
-                Ok(())
+                // Advance to the next token on success
+                $self.next_token()?;
+                // Return the position of the consumed token
+                Ok(pos_snapshot)
             }
             other => {
                 let err = ParseError::Unexpected {
@@ -86,7 +103,10 @@ macro_rules! expect {
                     expected: $expected,
                     pos: $self.pos.clone(),
                 };
-                $self.token = other; // restores the state
+
+                // Restore parser state
+                $self.token = other;
+
                 Err(err)
             }
         }

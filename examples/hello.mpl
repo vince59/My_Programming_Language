@@ -4,6 +4,9 @@ import "lib\unit.mpl"
 main() {
   print("Hello from mpl !") // single line comment
   call hello_from_unit()
+  
+#
+
   /* 
   multiple lines comment
   */

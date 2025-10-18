@@ -334,9 +334,19 @@ impl Lexer {
                 }
             }
         }
-
+        let b = self.peek().unwrap();
+        let msg = if b.is_ascii() {
+            format!(
+                "unexpected token: '{}' (0x{:02X})",
+                (b as char).escape_default(),
+                b
+            )
+        } else {
+            // Non-ASCII byte; don't pretend it's a full Unicode char
+            format!("unexpected octet: 0x{:02X} (non-ASCII)", b)
+        };
         Err(LexError {
-            message: format!("caractère inattendu: 0x{:02X}", self.peek().unwrap()),
+            message: msg,
             pos: self.pos.clone(),
         })
     }

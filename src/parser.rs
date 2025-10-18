@@ -36,7 +36,7 @@ pub enum StrExpr {
 #[derive(Debug, Clone)]
 pub enum Stadment {
     Print(Vec<StrExpr>),
-    Call { name: String },
+    Call { name: String, pos: Position },
 }
 
 #[derive(Debug)]
@@ -142,7 +142,7 @@ impl Parser {
         self.next_token()?; // Get the first token
         while matches!(self.token, Token::Import) {
             self.next_token()?; // get the string after the keyword IMPORT
-            let import_name =
+            let (import_name, pos) =
                 crate::expect!(self,Token::Str(s) => s, "a path string after `import`")?;
             paths.push(import_name);
         }
@@ -164,7 +164,7 @@ impl Parser {
     pub fn parse_function(&mut self) -> Result<Function, ParseError> {
         let mut body = Vec::new();
         crate::expect!(self, Token::Fn, grammar::KW_FN)?;
-        let name = crate::expect!(self,Token::Ident(s) => s, "a valid function name after `fn`")?;
+        let (name, pos) = crate::expect!(self,Token::Ident(s) => s, "a valid function name after `fn`")?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
         crate::expect!(self, Token::LBrace, grammar::LBRACE)?;
@@ -213,10 +213,10 @@ impl Parser {
     // call_function ::=  CALL ident '(' ')'
     pub fn parse_call_function(&mut self) -> Result<Stadment, ParseError> {
         crate::expect!(self, Token::Call, grammar::KW_CALL)?;
-        let name = crate::expect!(self,Token::Ident(s) => s, "a valid function name after `call`")?;
+        let (name,pos) = crate::expect!(self,Token::Ident(s) => s, "a valid function name after `call`")?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
-        Ok(Stadment::Call { name })
+        Ok(Stadment::Call { name, pos })
     }
 
     // print ::=  PRINT '(' str_expr [',' str_expr] ')'

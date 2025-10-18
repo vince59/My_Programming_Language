@@ -116,7 +116,16 @@ RULES:
         )
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+fn main() {
+    if let Err(e) = real_main() {
+        // Use Display, not Debug
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
+}
+
+fn real_main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = build_cli().get_matches();
 
     let compile_mode = matches.get_flag("compile");

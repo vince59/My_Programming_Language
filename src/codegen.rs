@@ -243,7 +243,7 @@ impl CodeGenerator {
                 Stadment::Print(str_expr) => {
                     self.gen_print(str_expr, &mut instr);
                 }
-                Stadment::Call { name } => {
+                Stadment::Call { name, pos } => {
                     instr.call(self.fn_map[name] as u32);
                 }
             }
