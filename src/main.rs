@@ -177,7 +177,7 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
         // Generate WASM bytes
         let prog_name = file_stem_string(&src_file);
         let mut generator = CodeGenerator::new();
-        let wasm = generator.generate_wasm(prog_name, &program);
+        let wasm = generator.generate_wasm(prog_name, &program)?;
 
         // Determine WASM output path
         let wasm_out = if let Some(o) = matches.get_one::<String>("output") {
@@ -229,7 +229,7 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
         // Generate WASM bytes
         let prog_name = file_stem_string(&src_file);
         let mut generator = CodeGenerator::new();
-        let wasm = generator.generate_wasm(prog_name, &program);
+        let wasm = generator.generate_wasm(prog_name, &program)?;
 
         // Run directly from memory (no disk write).
         // NOTE: ensure runner exposes `run_wasm_bytes(&[u8]) -> Result<(), E>`.

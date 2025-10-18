@@ -66,6 +66,7 @@ pub enum ParseError {
         expected: &'static str,
         pos: Position,
     },
+    Generator{pos: Position, msg: String},
 }
 
 impl From<LexError> for ParseError {
@@ -87,6 +88,14 @@ impl std::fmt::Display for ParseError {
                 " Grammar error : Expected {}, found {:?}\n in file {}\n at line {}\n col {}\n",
                 expected,
                 found,
+                pos.file_name.to_string_lossy(),
+                pos.line,
+                pos.col,
+            ),
+            Self::Generator{pos, msg} => write!(
+                f,
+                " Code generation error : {}\n in file {}\n at line {}\n col {}\n",
+                msg,
                 pos.file_name.to_string_lossy(),
                 pos.line,
                 pos.col,

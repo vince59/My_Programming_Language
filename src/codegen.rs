@@ -1,4 +1,7 @@
-use crate::parser::{BinOp, Expr, Function as ParserFunction, Program, Stadment, StrExpr};
+use crate::parser::{
+    BinOp, Expr, Function as ParserFunction, ParseError, Program, Stadment, StrExpr,
+};
+
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalSection, GlobalType, ImportSection, MemoryType, Module, NameMap,
@@ -122,7 +125,7 @@ impl CodeGenerator {
         expr: &Expr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
         target: Ty,
-    ) {
+    ) -> Result<(), ParseError> {
         match expr {
             Expr::Int(i) => {
                 instr.i32_const(*i);
@@ -130,24 +133,27 @@ impl CodeGenerator {
                     // signed i32 -> f64
                     instr.f64_convert_i32_s();
                 }
+                Ok(())
             }
             Expr::Real(r) => {
                 match target {
                     Ty::F64 => {
                         instr.f64_const((*r).into());
+                        Ok(())
                     }
                     Ty::I32 => {
                         // f64 -> i32 (trunc toward zero, traps on NaN or out-of-range)
                         instr.f64_const((*r).into());
                         instr.i32_trunc_f64_s();
+                        Ok(())
                     }
                 }
             }
             Expr::Binary { op, left, right } => {
                 let target_ty = target;
                 // make both operands the same target type
-                self.gen_expression_as(left, instr, target_ty);
-                self.gen_expression_as(right, instr, target_ty);
+                self.gen_expression_as(left, instr, target_ty)?;
+                self.gen_expression_as(right, instr, target_ty)?;
 
                 match (op, target_ty) {
                     (BinOp::Add, Ty::I32) => instr.i32_add(),
@@ -160,6 +166,7 @@ impl CodeGenerator {
                     (BinOp::Mul, Ty::F64) => instr.f64_mul(),
                     (BinOp::Div, Ty::F64) => instr.f64_div(),
                 };
+                Ok(())
             }
         }
     }
@@ -169,30 +176,31 @@ impl CodeGenerator {
         &mut self,
         expr: &Expr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
-    ) -> Ty {
+    ) -> Result<Ty, ParseError> {
         let target = self.infer_type(expr);
-        self.gen_expression_as(expr, instr, target);
-        target
+        self.gen_expression_as(expr, instr, target)?;
+        Ok(target)
     }
     // Expressions de chaînes (littéral -> Blob; conversion/concat -> valeurs déjà sur la pile)
     fn gen_str_expression(
         &mut self,
         expr: &StrExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
-    ) -> Option<Blob> {
+    ) -> Result<Option<Blob>, ParseError> {
         match expr {
             StrExpr::Str(s) => {
                 // place la chaîne dans la mémoire importée via DataSection
                 let blob = push_text(&mut self.data, 0, &mut self.data_idx, s, 16);
-                Some(blob)
-            },
+                Ok(Some(blob))
+            }
             StrExpr::Nl => {
                 let blob = push_text(&mut self.data, 0, &mut self.data_idx, "\n", 16);
-                Some(blob)
-            },
+                Ok(Some(blob))
+            }
             StrExpr::NumToStr(inner) => {
-                let inner = &**inner; 
-                match self.gen_expression(inner, instr) { // push n
+                let inner = &**inner;
+                match self.gen_expression(inner, instr)? {
+                    // push n
                     Ty::I32 => {
                         instr.call(self.fn_map["to_str_i32"] as u32); // (i32)->(i32,i32): [ptr,len]
                     }
@@ -200,7 +208,7 @@ impl CodeGenerator {
                         instr.call(self.fn_map["to_str_f64"] as u32); // (f64)->(i32,i32): [ptr,len]
                     }
                 }
-                None
+                Ok(None)
             }
         }
     }
@@ -210,20 +218,20 @@ impl CodeGenerator {
         &mut self,
         str_expr: &Vec<StrExpr>,
         instr: &mut wasm_encoder::InstructionSink<'_>,
-    ) {
+    ) -> Result<(), ParseError> {
         match str_expr.as_slice() {
             [] => {}
             [only] => {
-                if let Some(blob) = self.gen_str_expression(only, instr) {
+                if let Some(blob) = self.gen_str_expression(only, instr)? {
                     instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                 }
             }
             [first, rest @ ..] => {
-                if let Some(blob) = self.gen_str_expression(first, instr) {
+                if let Some(blob) = self.gen_str_expression(first, instr)? {
                     instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                 }
                 for e in rest {
-                    if let Some(blob) = self.gen_str_expression(e, instr) {
+                    if let Some(blob) = self.gen_str_expression(e, instr)? {
                         instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                     }
                     // stack: ... s1_ptr s1_len s2_ptr s2_len -> concat -> s_ptr s_len
@@ -232,24 +240,33 @@ impl CodeGenerator {
             }
         }
         instr.call(self.fn_map["log"] as u32);
+        Ok(())
     }
 
-    pub fn gen_function(&mut self, function: &ParserFunction) {
+    pub fn gen_function(&mut self, function: &ParserFunction) -> Result<(), ParseError> {
         self.functions.function(self.ty_void); // ()->()
         let mut fnc = Function::new([]); // pas de locals
         let mut instr = fnc.instructions();
         for stdm in &function.body {
             match stdm {
                 Stadment::Print(str_expr) => {
-                    self.gen_print(str_expr, &mut instr);
+                    self.gen_print(str_expr, &mut instr)?;
                 }
                 Stadment::Call { name, pos } => {
-                    instr.call(self.fn_map[name] as u32);
+                    if let Some(fn_id) = self.fn_map.get(name) {
+                        instr.call(*fn_id as u32);
+                    } else {
+                        return Err(ParseError::Generator {
+                            pos: pos.clone(),
+                            msg: format!("unknown function '{}'", name),
+                        });
+                    }
                 }
             }
         }
         instr.end();
         self.code.function(&fnc);
+        Ok(())
     }
 
     // Déclare une fonction importée (module, name, (params)->(results))
@@ -271,7 +288,7 @@ impl CodeGenerator {
         self.fn_idx += 1;
     }
 
-    pub fn generate_wasm(&mut self, prog_name: String, prog: &Program) -> Vec<u8> {
+    pub fn generate_wasm(&mut self, prog_name: String, prog: &Program) -> Result<Vec<u8>, ParseError> {
         self.names.module(&prog_name);
 
         // 1) Types: ()->() en type 0
@@ -330,12 +347,12 @@ impl CodeGenerator {
 
         // 5) Génération du code
         for f in &prog.functions {
-            self.gen_function(f);
+            self.gen_function(f)?;
         }
         for f in &prog.main_program.functions {
-            self.gen_function(f);
+            self.gen_function(f)?;
         }
-        self.gen_function(&prog.main_program.main);
+        self.gen_function(&prog.main_program.main)?;
 
         // 6) Export de main (dernier index déclaré dans notre mapping)
         self.exports.export(
@@ -371,6 +388,6 @@ impl CodeGenerator {
         module.section(&self.code);
         module.section(&self.data);
         module.section(&self.names);
-        module.finish()
+        Ok(module.finish())
     }
 }
