@@ -56,7 +56,7 @@ pub fn run_wasm_bytes(wasm_bytes: &[u8]) -> Result<()> {
             "log",
             move |mut caller: Caller<'_, ()>, ptr: i32, len: i32| {
                 let bytes = read_slice(&mem, &mut caller, ptr as u32, len as u32);
-                println!("{}", String::from_utf8_lossy(&bytes));
+                print!("{}", String::from_utf8_lossy(&bytes));
             },
         )?;
     }
