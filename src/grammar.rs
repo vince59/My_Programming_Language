@@ -23,6 +23,7 @@ pub enum Token {
     Minus,
     Star,
     Slash,
+    Nl,
     Eof,
 }
 
@@ -32,6 +33,7 @@ pub const KW_MAIN: &str = "main";
 pub const KW_PRINT: &str = "print";
 pub const KW_CALL: &str = "call";
 pub const KW_TO_STR: &str = "to_str";
+pub const KW_NL: &str = "nl";
 
 pub const LPAREN: &str = "(";
 pub const RPAREN: &str = ")";

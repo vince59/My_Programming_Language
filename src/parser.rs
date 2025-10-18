@@ -30,6 +30,7 @@ pub enum Expr {
 pub enum StrExpr {
     Str(String),
     NumToStr(Box<Expr>),
+    Nl
 }
 
 #[derive(Debug, Clone)]
@@ -232,7 +233,7 @@ impl Parser {
         Ok(Stadment::Print(str_expr))
     }
 
-    // str_expr ::= str | to_str(expr)
+    // str_expr ::= str | to_str(expr) | NL
     fn parse_str_expr(&mut self) -> Result<StrExpr, ParseError> {
         let tok = self.token.clone();
         match tok {
@@ -246,7 +247,11 @@ impl Parser {
                 let inner = self.parse_expr()?;
                 crate::expect!(self, Token::RParen, grammar::RPAREN)?;
                 Ok(StrExpr::NumToStr(Box::new(inner)))
-            }
+            },
+            Token::Nl => {
+                self.next_token()?;
+                Ok(StrExpr::Nl)
+            },
             _ => Err(ParseError::Unexpected {
                 found: self.token.clone(),
                 expected: "a string or to_str(num)",

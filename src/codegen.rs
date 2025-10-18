@@ -185,7 +185,11 @@ impl CodeGenerator {
                 // place la chaîne dans la mémoire importée via DataSection
                 let blob = push_text(&mut self.data, 0, &mut self.data_idx, s, 16);
                 Some(blob)
-            }
+            },
+            StrExpr::Nl => {
+                let blob = push_text(&mut self.data, 0, &mut self.data_idx, "\n", 16);
+                Some(blob)
+            },
             StrExpr::NumToStr(inner) => {
                 let inner = &**inner; 
                 match self.gen_expression(inner, instr) { // push n
