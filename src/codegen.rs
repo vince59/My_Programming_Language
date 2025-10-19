@@ -16,36 +16,60 @@ struct Blob {
     len: u32,
 }
 
-// Aligne 'x' vers le multiple supérieur de 'align'
+#[inline]
 fn align_up(x: u32, align: u32) -> u32 {
-    if align == 0 {
+    // Align `x` up to the next multiple of `align` (assumes align >= 1, power-of-two in practice).
+    if align <= 1 {
         return x;
     }
-    let m = align - 1;
-    (x + m) & !m
+    let a = align - 1;
+    (x + a) & !a
 }
 
-// Place du texte dans la DataSection à la position 'cursor', alignée sur 'align'
-fn push_text(
+/// Insert `text` into the DataSection if needed, returning its (ptr,len).
+/// - De-duplicates via `interner` (text -> Blob).
+/// - Respects `align`. If an existing entry for the same text does not meet the requested
+///   alignment (`ptr % align != 0`), a new copy is emitted at a properly aligned address.
+pub fn push_text(
     data: &mut DataSection,
     mem_index: u32,
     cursor: &mut u32,
     text: &str,
     align: u32,
+    interner: &mut HashMap<String, Blob>,
 ) -> Blob {
-    *cursor = align_up(*cursor, align);
+    // If we already have this text and it satisfies the requested alignment, reuse it.
+    if let Some(&blob) = interner.get(text) {
+        if align <= 1 || blob.ptr % align == 0 {
+            return blob;
+        }
+        // Otherwise, fall through and allocate a new, stricter-aligned copy.
+    }
+
+    // Allocate a new slice with proper alignment.
+    *cursor = align_up(*cursor, align.max(1));
     let ptr = *cursor;
     let bytes = text.as_bytes();
+
+    // Emit active data segment at `ptr`.
     data.active(
         mem_index,
         &ConstExpr::i32_const(ptr as i32),
         bytes.iter().copied(),
     );
+
+    // Advance the cursor.
     *cursor += bytes.len() as u32;
-    Blob {
+
+    let blob = Blob {
         ptr,
         len: bytes.len() as u32,
-    }
+    };
+
+    // Update the best-known location for this text (now satisfies `align`).
+    interner.insert(text.to_owned(), blob);
+
+    blob
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -63,6 +87,7 @@ pub struct CodeGenerator {
     exports: ExportSection,
     names: NameSection,
     globals: GlobalSection,
+    string_interner: HashMap<String, Blob>, // Maps string literals to their memory locations (prevents duplicates).
 
     // bookkeeping
     fn_names: NameMap,
@@ -83,7 +108,7 @@ impl CodeGenerator {
             exports: ExportSection::new(),
             names: NameSection::new(),
             globals: GlobalSection::new(),
-
+            string_interner: HashMap::new(),
             fn_names: NameMap::new(),
             fn_idx: 0,
             fn_map: HashMap::new(),
@@ -181,7 +206,8 @@ impl CodeGenerator {
         self.gen_expression_as(expr, instr, target)?;
         Ok(target)
     }
-    // Expressions de chaînes (littéral -> Blob; conversion/concat -> valeurs déjà sur la pile)
+
+    // String expressions (literal -> Blob; conversion/concat -> values already on stack)
     fn gen_str_expression(
         &mut self,
         expr: &StrExpr,
@@ -189,12 +215,26 @@ impl CodeGenerator {
     ) -> Result<Option<Blob>, ParseError> {
         match expr {
             StrExpr::Str(s) => {
-                // place la chaîne dans la mémoire importée via DataSection
-                let blob = push_text(&mut self.data, 0, &mut self.data_idx, s, 16);
+                // push string literal into data section
+                let blob = push_text(
+                    &mut self.data,
+                    0,
+                    &mut self.data_idx,
+                    s,
+                    16,
+                    &mut self.string_interner,
+                );
                 Ok(Some(blob))
             }
             StrExpr::Nl => {
-                let blob = push_text(&mut self.data, 0, &mut self.data_idx, "\n", 16);
+                let blob = push_text(
+                    &mut self.data,
+                    0,
+                    &mut self.data_idx,
+                    "\n",
+                    16,
+                    &mut self.string_interner,
+                );
                 Ok(Some(blob))
             }
             StrExpr::NumToStr(inner) => {
@@ -213,7 +253,7 @@ impl CodeGenerator {
         }
     }
 
-    // print([...]) -> construit (ptr,len) puis appelle env.log(ptr,len)
+    // print([...]) -> build (ptr,len) then call env.log(ptr,len)
     pub fn gen_print(
         &mut self,
         str_expr: &Vec<StrExpr>,
@@ -315,7 +355,7 @@ impl CodeGenerator {
         self.code.function(&fnc);
         Ok(())
     }
-    
+
     // Déclare une fonction importée (module, name, (params)->(results))
     pub fn push_imported_function(
         &mut self,
