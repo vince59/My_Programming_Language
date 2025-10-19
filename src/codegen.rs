@@ -140,6 +140,9 @@ impl CodeGenerator {
                     Ty::I32
                 }
             }
+            NumExpr::Var { var, pos } => {
+                var.ty
+            }
         }
     }
 
@@ -150,6 +153,7 @@ impl CodeGenerator {
         expr: &NumExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
         target: Ty,
+        function: &ParserFunction
     ) -> Result<(), ParseError> {
         match expr {
             NumExpr::Int(i) => {
@@ -177,8 +181,8 @@ impl CodeGenerator {
             NumExpr::Binary { op, left, right } => {
                 let target_ty = target;
                 // make both operands the same target type
-                self.gen_expression_as(left, instr, target_ty)?;
-                self.gen_expression_as(right, instr, target_ty)?;
+                self.gen_expression_as(left, instr, target_ty, function)?;
+                self.gen_expression_as(right, instr, target_ty, function)?;
 
                 match (op, target_ty) {
                     (BinOp::Add, Ty::I32) => instr.i32_add(),
@@ -193,6 +197,32 @@ impl CodeGenerator {
                 };
                 Ok(())
             }
+            NumExpr::Var { var, pos } => {
+                let idx = match crate::parser::find_variable_index(&function.variables, &var.name) {
+                    Some(i) => i as u32,
+                    None => {
+                        return Err(ParseError::Generator {
+                            pos: pos.clone(),
+                            msg: format!("unknown variable '{}'", var.name),
+                        });
+                    }
+                };
+                match var.ty {
+                    Ty::I32 => {
+                        instr.local_get(idx);
+                        if target == Ty::F64 {
+                            instr.f64_convert_i32_s();
+                        }
+                    }
+                    Ty::F64 => {
+                        instr.local_get(idx);
+                        if target == Ty::I32 {
+                            instr.i32_trunc_f64_s();
+                        }
+                    }
+                }
+                Ok(())
+            }
         }
     }
 
@@ -201,9 +231,10 @@ impl CodeGenerator {
         &mut self,
         expr: &NumExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
+        function: &ParserFunction
     ) -> Result<Ty, ParseError> {
         let target = self.infer_type(expr);
-        self.gen_expression_as(expr, instr, target)?;
+        self.gen_expression_as(expr, instr, target, function)?;
         Ok(target)
     }
 
@@ -212,6 +243,7 @@ impl CodeGenerator {
         &mut self,
         expr: &StrExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
+        function: &ParserFunction
     ) -> Result<Option<Blob>, ParseError> {
         match expr {
             StrExpr::Str(s) => {
@@ -239,7 +271,7 @@ impl CodeGenerator {
             }
             StrExpr::NumToStr(inner) => {
                 let inner = &**inner;
-                match self.gen_expression(inner, instr)? {
+                match self.gen_expression(inner, instr, function)? {
                     // push n
                     Ty::I32 => {
                         instr.call(self.fn_map["to_str_i32"] as u32); // (i32)->(i32,i32): [ptr,len]
@@ -258,20 +290,21 @@ impl CodeGenerator {
         &mut self,
         str_expr: &Vec<StrExpr>,
         instr: &mut wasm_encoder::InstructionSink<'_>,
+        function: &ParserFunction
     ) -> Result<(), ParseError> {
         match str_expr.as_slice() {
             [] => {}
             [only] => {
-                if let Some(blob) = self.gen_str_expression(only, instr)? {
+                if let Some(blob) = self.gen_str_expression(only, instr, function)? {
                     instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                 }
             }
             [first, rest @ ..] => {
-                if let Some(blob) = self.gen_str_expression(first, instr)? {
+                if let Some(blob) = self.gen_str_expression(first, instr, function)? {
                     instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                 }
                 for e in rest {
-                    if let Some(blob) = self.gen_str_expression(e, instr)? {
+                    if let Some(blob) = self.gen_str_expression(e, instr, function)? {
                         instr.i32_const(blob.ptr as i32).i32_const(blob.len as i32);
                     }
                     // stack: ... s1_ptr s1_len s2_ptr s2_len -> concat -> s_ptr s_len
@@ -331,7 +364,7 @@ impl CodeGenerator {
 
         for stdm in &function.body {
             match stdm {
-                Stadment::Print(str_expr) => self.gen_print(str_expr, &mut instr)?,
+                Stadment::Print(str_expr) => self.gen_print(str_expr, &mut instr, function)?,
                 Stadment::Call { name, pos } => {
                     if let Some(fid) = self.fn_map.get(name) {
                         instr.call(*fid as u32);
@@ -346,7 +379,7 @@ impl CodeGenerator {
                     // generate expression
                     match &expr {
                         Expr::Num(num_expr) => {
-                            self.gen_expression_as(&num_expr, &mut instr, var.ty)?;
+                            self.gen_expression_as(&num_expr, &mut instr, var.ty,function)?;
                         }
                         _ => {
                             return Err(ParseError::Generator {

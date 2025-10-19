@@ -7,8 +7,9 @@ main() {
   /*local string s = "toto"
   local bool b = true */
 
-  let i = 5
-  // print("Data types :",nl, "i = ",i,nl,"f = ",f,nl,"s : ",s,nl,"b ",b,nl)
+  let i = 5.5
+  let f = 12.3 + i
+  print("Data types :",nl, "i = ",to_str(i),nl,"f = ",to_str(f),nl)
 
   print("Hello from mpl !",nl) // single line comment
   call hello_from_unit()
