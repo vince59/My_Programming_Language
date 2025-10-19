@@ -299,6 +299,11 @@ impl Lexer {
                         grammar::KW_PRINT => Token::Print,
                         grammar::KW_TO_STR => Token::ToStr,
                         grammar::KW_NL => Token::Nl,
+                        grammar::KW_LOCAL => Token::Local,
+                        grammar::KW_TRUE => Token::True,
+                        grammar::KW_FALSE => Token::False,
+                        grammar::KW_INT_TYPE => Token::IntType,
+                        grammar::KW_FLOAT_TYPE => Token::FloatType,
                         _ => Token::Ident(id.to_string()), // if not it is an ident
                     },
                     self.pos.clone(),
@@ -319,11 +324,11 @@ impl Lexer {
                     };
 
                     let value = value_str.parse::<f64>().map_err(|_| LexError {
-                        message: "invalid real number format".to_string(),
+                        message: "invalid float number format".to_string(),
                         pos: self.pos.clone(),
                     })?;
 
-                    return Ok((Token::Real(value), self.pos.clone()));
+                    return Ok((Token::Float(value), self.pos.clone()));
                 } else {
                     let value = lexeme.parse::<i32>().map_err(|_| LexError {
                         message: "invalid integer format".to_string(),

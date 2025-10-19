@@ -12,7 +12,7 @@ pub enum Token {
     Ident(String),
     Str(String),
     Integer(i32),
-    Real(f64),
+    Float(f64),
     ToStr,
     LParen,
     RParen,
@@ -24,6 +24,12 @@ pub enum Token {
     Star,
     Slash,
     Nl,
+    Local,
+    True,
+    False,
+    Equal,
+    IntType,
+    FloatType,
     Eof,
 }
 
@@ -34,6 +40,11 @@ pub const KW_PRINT: &str = "print";
 pub const KW_CALL: &str = "call";
 pub const KW_TO_STR: &str = "to_str";
 pub const KW_NL: &str = "nl";
+pub const KW_LOCAL: &str = "local";
+pub const KW_TRUE: &str = "true";
+pub const KW_FALSE: &str = "false";
+pub const KW_INT_TYPE: &str = "int";
+pub const KW_FLOAT_TYPE: &str = "float";
 
 pub const LPAREN: &str = "(";
 pub const RPAREN: &str = ")";
@@ -44,6 +55,7 @@ pub const PLUS: &str = "+";
 pub const MINUS: &str = "-";
 pub const STAR: &str = "*";
 pub const SLASH: &str = "/";
+pub const EQUAL: &str = "=";
 
 pub const EOF: &str = "end of file";
 

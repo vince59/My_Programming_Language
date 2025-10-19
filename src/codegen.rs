@@ -1,11 +1,11 @@
 use crate::parser::{
-    BinOp, Expr, Function as ParserFunction, ParseError, Program, Stadment, StrExpr,
+    BinOp, Expr, Function as ParserFunction, ParseError, Program, Stadment, StrExpr, Variable,
 };
 
 use wasm_encoder::{
     CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
-    FunctionSection, GlobalSection, GlobalType, ImportSection, MemoryType, Module, NameMap,
-    NameSection, TypeSection, ValType,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, IndirectNameMap, MemoryType, Module,
+    NameMap, NameSection, TypeSection, ValType,
 };
 
 use std::collections::HashMap;
@@ -105,7 +105,7 @@ impl CodeGenerator {
     fn infer_type(&self, e: &Expr) -> Ty {
         match e {
             Expr::Int(_) => Ty::I32,
-            Expr::Real(_) => Ty::F64,
+            Expr::Float(_) => Ty::F64,
             Expr::Binary { left, right, .. } => {
                 let lt = self.infer_type(left);
                 let rt = self.infer_type(right);
@@ -135,7 +135,7 @@ impl CodeGenerator {
                 }
                 Ok(())
             }
-            Expr::Real(r) => {
+            Expr::Float(r) => {
                 match target {
                     Ty::F64 => {
                         instr.f64_const((*r).into());
@@ -243,18 +243,64 @@ impl CodeGenerator {
         Ok(())
     }
 
+    pub fn gen_variables(
+        &mut self,
+        variables: &[Variable],
+        fn_id: u32,
+        param_count: u32, // <- passe 0 si pas de paramètres
+    ) -> Vec<(u32, ValType)> {
+        // 1) Prépare la map de noms pour cette fonction
+        let mut fn_locals = NameMap::new();
+
+        // 2) Construit la liste des locals (en groupes (count, type))
+        let mut locals: Vec<(u32, ValType)> = Vec::with_capacity(variables.len());
+
+        // index logique des locals dans la fonction = params d'abord, puis locals
+        let mut local_index = param_count;
+
+        for var in variables {
+            let val_ty = match var.ty {
+                Ty::I32 => ValType::I32,
+                Ty::F64 => ValType::F64,
+            };
+
+            // IMPORTANT: (1, type) = ajoute UNE local de ce type
+            locals.push((1, val_ty));
+
+            // IMPORTANT: l'indice pour le nom est 0-based (après les params)
+            fn_locals.append(local_index, &var.name);
+
+            local_index += 1;
+        }
+
+        // 3) Ajoute ces noms à la NameSection
+        let mut local_names = IndirectNameMap::new();
+        local_names.append(fn_id, &fn_locals);
+        self.names.locals(&local_names);
+
+        locals
+    }
+
     pub fn gen_function(&mut self, function: &ParserFunction) -> Result<(), ParseError> {
-        self.functions.function(self.ty_void); // ()->()
-        let mut fnc = Function::new([]); // pas de locals
+        self.functions.function(self.ty_void); // () -> ()
+
+        let fn_id = self.fn_map[&function.name] as u32;
+
+        // si ta fonction n'a pas de paramètres :
+        let param_count = 0;
+
+        let locals = self.gen_variables(&function.variables, fn_id, param_count);
+
+        // Function::new attend des groupes (count, ValType)
+        let mut fnc = wasm_encoder::Function::new(locals);
         let mut instr = fnc.instructions();
+
         for stdm in &function.body {
             match stdm {
-                Stadment::Print(str_expr) => {
-                    self.gen_print(str_expr, &mut instr)?;
-                }
+                Stadment::Print(str_expr) => self.gen_print(str_expr, &mut instr)?,
                 Stadment::Call { name, pos } => {
-                    if let Some(fn_id) = self.fn_map.get(name) {
-                        instr.call(*fn_id as u32);
+                    if let Some(fid) = self.fn_map.get(name) {
+                        instr.call(*fid as u32);
                     } else {
                         return Err(ParseError::Generator {
                             pos: pos.clone(),
@@ -264,11 +310,12 @@ impl CodeGenerator {
                 }
             }
         }
+
         instr.end();
         self.code.function(&fnc);
         Ok(())
     }
-
+    
     // Déclare une fonction importée (module, name, (params)->(results))
     pub fn push_imported_function(
         &mut self,
@@ -288,7 +335,11 @@ impl CodeGenerator {
         self.fn_idx += 1;
     }
 
-    pub fn generate_wasm(&mut self, prog_name: String, prog: &Program) -> Result<Vec<u8>, ParseError> {
+    pub fn generate_wasm(
+        &mut self,
+        prog_name: String,
+        prog: &Program,
+    ) -> Result<Vec<u8>, ParseError> {
         self.names.module(&prog_name);
 
         // 1) Types: ()->() en type 0

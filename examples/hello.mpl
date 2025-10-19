@@ -2,12 +2,12 @@ import "lib\utils.mpl"
 import "lib\unit.mpl"
 
 main() {
- /* let integer = 3
-  let float = 2.0
-  let str = ""
-  let bool = true */
+  local int i
+  local float f
+  /*local string s = "toto"
+  local bool b = true */
 
-  print("Data types :",nl, "integer=",integer,nl,"float :",float,nl,"str :",str,nl,"bool ",bool,nl)
+  // print("Data types :",nl, "i = ",i,nl,"f = ",f,nl,"s : ",s,nl,"b ",b,nl)
 
   print("Hello from mpl !",nl) // single line comment
   call hello_from_unit()

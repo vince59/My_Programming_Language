@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use crate::codegen::Ty;
 use crate::grammar::{self, Token};
 use crate::lexer::{LexError, Lexer, Position};
 
@@ -18,7 +19,7 @@ pub enum BinOp {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Int(i32),
-    Real(f64),
+    Float(f64),
     Binary {
         op: BinOp,
         left: Box<Expr>,
@@ -30,7 +31,7 @@ pub enum Expr {
 pub enum StrExpr {
     Str(String),
     NumToStr(Box<Expr>),
-    Nl
+    Nl,
 }
 
 #[derive(Debug, Clone)]
@@ -53,9 +54,16 @@ pub struct MainProgram {
 }
 
 #[derive(Debug)]
+pub struct Variable {
+    pub name: String,
+    pub ty: Ty,
+}
+
+#[derive(Debug)]
 pub struct Function {
     pub name: String,
     pub body: Vec<Stadment>,
+    pub variables: Vec<Variable>,
 }
 
 #[derive(Debug)]
@@ -66,7 +74,10 @@ pub enum ParseError {
         expected: &'static str,
         pos: Position,
     },
-    Generator{pos: Position, msg: String},
+    Generator {
+        pos: Position,
+        msg: String,
+    },
 }
 
 impl From<LexError> for ParseError {
@@ -92,7 +103,7 @@ impl std::fmt::Display for ParseError {
                 pos.line,
                 pos.col,
             ),
-            Self::Generator{pos, msg} => write!(
+            Self::Generator { pos, msg } => write!(
                 f,
                 " Code generation error : {}\n in file {}\n at line {}\n col {}\n",
                 msg,
@@ -168,20 +179,30 @@ impl Parser {
     }
 
     // function ::= FN ident '(' ')' '{'
+    //                           [ { variable_declaration } ]
     //                           [ { stadment } ]
     //                       '}'
     pub fn parse_function(&mut self) -> Result<Function, ParseError> {
         let mut body = Vec::new();
+        let mut variables = Vec::new();
         crate::expect!(self, Token::Fn, grammar::KW_FN)?;
-        let (name, pos) = crate::expect!(self,Token::Ident(s) => s, "a valid function name after `fn`")?;
+        let (name, pos) =
+            crate::expect!(self,Token::Ident(s) => s, "a valid function name after `fn`")?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
         crate::expect!(self, Token::LBrace, grammar::LBRACE)?;
+        while matches!(self.token, Token::Local) {
+            variables.push(self.parse_variable_declaration()?);
+        }
         while !matches!(self.token, Token::RBrace) {
             body.push(self.parse_stadment()?);
         }
         crate::expect!(self, Token::RBrace, grammar::RBRACE)?;
-        Ok(Function { name, body })
+        Ok(Function {
+            name,
+            body,
+            variables,
+        })
     }
 
     //stadment ::= call_function | print
@@ -198,16 +219,21 @@ impl Parser {
     }
 
     // main_function ::=  MAIN '(' ')' '{'
+    //                        [ { variable_declaration } ]
     //                        [ { stadment } ]
     //                    '}'
     //                    EOF
     pub fn parse_main_function(&mut self) -> Result<Function, ParseError> {
         let mut body = Vec::new();
-
+        let mut variables = Vec::new();
         crate::expect!(self, Token::Main, grammar::KW_MAIN)?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
         crate::expect!(self, Token::LBrace, grammar::LBRACE)?;
+        while matches!(self.token, Token::Local) {
+            variables.push(self.parse_variable_declaration()?);
+
+        }
         while !matches!(self.token, Token::RBrace) {
             body.push(self.parse_stadment()?);
         }
@@ -216,13 +242,15 @@ impl Parser {
         Ok(Function {
             name: grammar::KW_MAIN.to_string(),
             body,
+            variables,
         })
     }
 
     // call_function ::=  CALL ident '(' ')'
     pub fn parse_call_function(&mut self) -> Result<Stadment, ParseError> {
         crate::expect!(self, Token::Call, grammar::KW_CALL)?;
-        let (name,pos) = crate::expect!(self,Token::Ident(s) => s, "a valid function name after `call`")?;
+        let (name, pos) =
+            crate::expect!(self,Token::Ident(s) => s, "a valid function name after `call`")?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
         Ok(Stadment::Call { name, pos })
@@ -256,11 +284,11 @@ impl Parser {
                 let inner = self.parse_expr()?;
                 crate::expect!(self, Token::RParen, grammar::RPAREN)?;
                 Ok(StrExpr::NumToStr(Box::new(inner)))
-            },
+            }
             Token::Nl => {
                 self.next_token()?;
                 Ok(StrExpr::Nl)
-            },
+            }
             _ => Err(ParseError::Unexpected {
                 found: self.token.clone(),
                 expected: "a string or to_str(num)",
@@ -324,7 +352,7 @@ impl Parser {
         Ok(node)
     }
 
-    // primary ::= INT | REAL |'(' expr ')'
+    // primary ::= INT | FLOAT |'(' expr ')'
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         let tok = self.token.clone();
         match tok {
@@ -332,9 +360,9 @@ impl Parser {
                 self.next_token()?;
                 Ok(Expr::Int(n))
             }
-            Token::Real(n) => {
+            Token::Float(n) => {
                 self.next_token()?;
-                Ok(Expr::Real(n))
+                Ok(Expr::Float(n))
             }
             Token::LParen => {
                 self.next_token()?;
@@ -348,5 +376,32 @@ impl Parser {
                 pos: self.pos.clone(),
             }),
         }
+    }
+    // type ::= INT | FLOAT
+    fn parse_type(&mut self) -> Result<Ty, ParseError> {
+        match self.token {
+            Token::IntType => {
+                self.next_token()?;
+                Ok(Ty::I32)
+            }
+            Token::FloatType => {
+                self.next_token()?;
+                Ok(Ty::F64)
+            }
+            _ => Err(ParseError::Unexpected {
+                found: self.token.clone(),
+                expected: "a type (int or float)",
+                pos: self.pos.clone(),
+            }),
+        }
+    }
+
+    // variable_declaration ::= LOCAL type ident
+    fn parse_variable_declaration(&mut self) -> Result<Variable, ParseError> {
+        crate::expect!(self, Token::Local, grammar::KW_LOCAL)?;
+        let ty = self.parse_type()?;
+        let (name, pos) =
+            crate::expect!(self,Token::Ident(s) => s, "a valid variable name after `local type`")?;
+        Ok(Variable { name, ty })
     }
 }
