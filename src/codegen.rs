@@ -1,9 +1,9 @@
 use crate::parser::{
-    BinOp, Expr, Function as ParserFunction, ParseError, Program, Stadment, StrExpr, Variable,
+    BinOp, NumExpr, Function as ParserFunction, ParseError, Program, Stadment, StrExpr, Variable, Expr
 };
 
 use wasm_encoder::{
-    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, Function,
+    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, 
     FunctionSection, GlobalSection, GlobalType, ImportSection, IndirectNameMap, MemoryType, Module,
     NameMap, NameSection, TypeSection, ValType,
 };
@@ -127,11 +127,11 @@ impl CodeGenerator {
 
     // Decide the resulting type of an expression.
     // Rule: if any side is F64, result is F64; otherwise I32.
-    fn infer_type(&self, e: &Expr) -> Ty {
+    fn infer_type(&self, e: &NumExpr) -> Ty {
         match e {
-            Expr::Int(_) => Ty::I32,
-            Expr::Float(_) => Ty::F64,
-            Expr::Binary { left, right, .. } => {
+            NumExpr::Int(_) => Ty::I32,
+            NumExpr::Float(_) => Ty::F64,
+            NumExpr::Binary { left, right, .. } => {
                 let lt = self.infer_type(left);
                 let rt = self.infer_type(right);
                 if lt == Ty::F64 || rt == Ty::F64 {
@@ -147,12 +147,12 @@ impl CodeGenerator {
     // Allowed: i32 -> f64 (widen) and f64 -> i32 (narrow via trunc toward zero).
     fn gen_expression_as(
         &mut self,
-        expr: &Expr,
+        expr: &NumExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
         target: Ty,
     ) -> Result<(), ParseError> {
         match expr {
-            Expr::Int(i) => {
+            NumExpr::Int(i) => {
                 instr.i32_const(*i);
                 if target == Ty::F64 {
                     // signed i32 -> f64
@@ -160,7 +160,7 @@ impl CodeGenerator {
                 }
                 Ok(())
             }
-            Expr::Float(r) => {
+            NumExpr::Float(r) => {
                 match target {
                     Ty::F64 => {
                         instr.f64_const((*r).into());
@@ -174,7 +174,7 @@ impl CodeGenerator {
                     }
                 }
             }
-            Expr::Binary { op, left, right } => {
+            NumExpr::Binary { op, left, right } => {
                 let target_ty = target;
                 // make both operands the same target type
                 self.gen_expression_as(left, instr, target_ty)?;
@@ -199,7 +199,7 @@ impl CodeGenerator {
     // Public entry: generate code and return the resulting type.
     pub fn gen_expression(
         &mut self,
-        expr: &Expr,
+        expr: &NumExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
     ) -> Result<Ty, ParseError> {
         let target = self.infer_type(expr);
@@ -303,13 +303,8 @@ impl CodeGenerator {
                 Ty::I32 => ValType::I32,
                 Ty::F64 => ValType::F64,
             };
-
-            // IMPORTANT: (1, type) = ajoute UNE local de ce type
             locals.push((1, val_ty));
-
-            // IMPORTANT: l'indice pour le nom est 0-based (après les params)
             fn_locals.append(local_index, &var.name);
-
             local_index += 1;
         }
 
@@ -331,7 +326,6 @@ impl CodeGenerator {
 
         let locals = self.gen_variables(&function.variables, fn_id, param_count);
 
-        // Function::new attend des groupes (count, ValType)
         let mut fnc = wasm_encoder::Function::new(locals);
         let mut instr = fnc.instructions();
 
@@ -347,6 +341,34 @@ impl CodeGenerator {
                             msg: format!("unknown function '{}'", name),
                         });
                     }
+                }
+                Stadment::Assignment { var, expr, pos } => {
+                    // generate expression
+                    match &expr {
+                        Expr::Num(num_expr) => {
+                            self.gen_expression_as(&num_expr, &mut instr, var.ty)?;
+                        }
+                        _ => {
+                            return Err(ParseError::Generator {
+                                pos: pos.clone(),
+                                msg: "only numeric expressions are supported in assignments"
+                                    .to_string(),
+                            });
+                        }
+                    }
+
+                    // find local index
+                    let idx = match crate::parser::find_variable_index(&function.variables, &var.name) {
+                        Some(i) => i as u32,
+                        None => {
+                            return Err(ParseError::Generator {
+                                pos: pos.clone(),
+                                msg: format!("unknown variable '{}'", var.name),
+                            });
+                        }
+                    };
+                    // set local
+                    instr.local_set(idx);
                 }
             }
         }
@@ -438,10 +460,10 @@ impl CodeGenerator {
 
         // 5) Génération du code
         for f in &prog.functions {
-            self.gen_function(f)?;
+            self.gen_function(&f)?;
         }
         for f in &prog.main_program.functions {
-            self.gen_function(f)?;
+            self.gen_function(&f)?;
         }
         self.gen_function(&prog.main_program.main)?;
 

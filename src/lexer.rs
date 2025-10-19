@@ -186,6 +186,9 @@ impl Lexer {
         if self.try_take(grammar::SLASH) {
             return Some(Token::Slash);
         }
+        if self.try_take(grammar::EQUAL) {
+            return Some(Token::Equal);
+        }
         None
     }
 
@@ -304,6 +307,7 @@ impl Lexer {
                         grammar::KW_FALSE => Token::False,
                         grammar::KW_INT_TYPE => Token::IntType,
                         grammar::KW_FLOAT_TYPE => Token::FloatType,
+                        grammar::KW_LET => Token::Let,
                         _ => Token::Ident(id.to_string()), // if not it is an ident
                     },
                     self.pos.clone(),

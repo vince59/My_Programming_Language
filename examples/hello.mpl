@@ -7,6 +7,7 @@ main() {
   /*local string s = "toto"
   local bool b = true */
 
+  let i = 5
   // print("Data types :",nl, "i = ",i,nl,"f = ",f,nl,"s : ",s,nl,"b ",b,nl)
 
   print("Hello from mpl !",nl) // single line comment

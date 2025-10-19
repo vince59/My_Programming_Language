@@ -30,6 +30,7 @@ pub enum Token {
     Equal,
     IntType,
     FloatType,
+    Let,
     Eof,
 }
 
@@ -45,6 +46,7 @@ pub const KW_TRUE: &str = "true";
 pub const KW_FALSE: &str = "false";
 pub const KW_INT_TYPE: &str = "int";
 pub const KW_FLOAT_TYPE: &str = "float";
+pub const KW_LET: &str = "let";
 
 pub const LPAREN: &str = "(";
 pub const RPAREN: &str = ")";

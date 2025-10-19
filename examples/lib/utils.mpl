@@ -5,3 +5,6 @@ fn hello_from_utils() {
     print("test avec un call depuis utils")
     call hello_from_unit()
 }
+
+fn test() {
+}
