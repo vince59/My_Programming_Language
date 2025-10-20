@@ -1,13 +1,20 @@
 import "lib\utils.mpl"
 import "lib\unit.mpl"
 
+/*
+todo : 
+gestion des nombres négatifs
+gestion des booleen
+gestion des chaines
+*/
+
 main() {
   local int i
   local float f
   /*local string s = "toto"
   local bool b = true */
 
-  let i = 5.5
+  let i = 5-50
   let f = 12.3 + i
   print("Data types :",nl, "i = ",to_str(i),nl,"f = ",to_str(f),nl)
 
