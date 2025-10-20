@@ -1,11 +1,12 @@
 use crate::parser::{
-    BinOp, NumExpr, Function as ParserFunction, ParseError, Program, Stadment, StrExpr, Variable, Expr
+    BinOp, Expr, Function as ParserFunction, NumExpr, ParseError, Program, Stadment, StrExpr,
+    Variable,
 };
 
 use wasm_encoder::{
-    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, 
-    FunctionSection, GlobalSection, GlobalType, ImportSection, IndirectNameMap, MemoryType, Module,
-    NameMap, NameSection, TypeSection, ValType,
+    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, FunctionSection,
+    GlobalSection, GlobalType, ImportSection, IndirectNameMap, MemoryType, Module, NameMap,
+    NameSection, TypeSection, ValType,
 };
 
 use std::collections::HashMap;
@@ -140,9 +141,8 @@ impl CodeGenerator {
                     Ty::I32
                 }
             }
-            NumExpr::Var { var, pos } => {
-                var.ty
-            }
+            NumExpr::Var { var, pos } => var.ty,
+            NumExpr::Neg(inner) => self.infer_type(inner),
         }
     }
 
@@ -153,9 +153,26 @@ impl CodeGenerator {
         expr: &NumExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
         target: Ty,
-        function: &ParserFunction
+        function: &ParserFunction,
     ) -> Result<(), ParseError> {
         match expr {
+            NumExpr::Neg(inner) => {
+                // Generate the inner value as the target type, then negate.
+                match target {
+                    Ty::F64 => {
+                        // f64: direct unary neg instruction
+                        self.gen_expression_as(inner, instr, Ty::F64, function)?;
+                        instr.f64_neg(); // stack: [-inner]
+                    }
+                    Ty::I32 => {
+                        // i32: there is no i32.neg; compute 0 - x
+                        instr.i32_const(0); // stack: [0]
+                        self.gen_expression_as(inner, instr, Ty::I32, function)?;
+                        instr.i32_sub(); // stack: [0 - x]
+                    }
+                }
+                return Ok(());
+            }
             NumExpr::Int(i) => {
                 instr.i32_const(*i);
                 if target == Ty::F64 {
@@ -231,7 +248,7 @@ impl CodeGenerator {
         &mut self,
         expr: &NumExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
-        function: &ParserFunction
+        function: &ParserFunction,
     ) -> Result<Ty, ParseError> {
         let target = self.infer_type(expr);
         self.gen_expression_as(expr, instr, target, function)?;
@@ -243,7 +260,7 @@ impl CodeGenerator {
         &mut self,
         expr: &StrExpr,
         instr: &mut wasm_encoder::InstructionSink<'_>,
-        function: &ParserFunction
+        function: &ParserFunction,
     ) -> Result<Option<Blob>, ParseError> {
         match expr {
             StrExpr::Str(s) => {
@@ -290,7 +307,7 @@ impl CodeGenerator {
         &mut self,
         str_expr: &Vec<StrExpr>,
         instr: &mut wasm_encoder::InstructionSink<'_>,
-        function: &ParserFunction
+        function: &ParserFunction,
     ) -> Result<(), ParseError> {
         match str_expr.as_slice() {
             [] => {}
@@ -379,7 +396,7 @@ impl CodeGenerator {
                     // generate expression
                     match &expr {
                         Expr::Num(num_expr) => {
-                            self.gen_expression_as(&num_expr, &mut instr, var.ty,function)?;
+                            self.gen_expression_as(&num_expr, &mut instr, var.ty, function)?;
                         }
                         _ => {
                             return Err(ParseError::Generator {
@@ -391,15 +408,16 @@ impl CodeGenerator {
                     }
 
                     // find local index
-                    let idx = match crate::parser::find_variable_index(&function.variables, &var.name) {
-                        Some(i) => i as u32,
-                        None => {
-                            return Err(ParseError::Generator {
-                                pos: pos.clone(),
-                                msg: format!("unknown variable '{}'", var.name),
-                            });
-                        }
-                    };
+                    let idx =
+                        match crate::parser::find_variable_index(&function.variables, &var.name) {
+                            Some(i) => i as u32,
+                            None => {
+                                return Err(ParseError::Generator {
+                                    pos: pos.clone(),
+                                    msg: format!("unknown variable '{}'", var.name),
+                                });
+                            }
+                        };
                     // set local
                     instr.local_set(idx);
                 }

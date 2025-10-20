@@ -31,7 +31,11 @@ pub enum NumExpr {
         left: Box<NumExpr>,
         right: Box<NumExpr>,
     },
-    Var{var: Variable, pos: Position},
+    Var {
+        var: Variable,
+        pos: Position,
+    },
+    Neg(Box<NumExpr>),
 }
 
 #[derive(Debug, Clone)]
@@ -298,7 +302,7 @@ impl Parser {
     }
 
     // print ::=  PRINT '(' str_expr [',' str_expr] ')'
-    pub fn parse_print(&mut self,variables: &Vec<Variable>) -> Result<Stadment, ParseError> {
+    pub fn parse_print(&mut self, variables: &Vec<Variable>) -> Result<Stadment, ParseError> {
         crate::expect!(self, Token::Print, grammar::KW_PRINT)?;
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
         let mut str_expr: Vec<StrExpr> = Vec::new();
@@ -312,7 +316,7 @@ impl Parser {
     }
 
     // str_expr ::= str | to_str(num_expr) | NL
-    fn parse_str_expr(&mut self,variables: &Vec<Variable>) -> Result<StrExpr, ParseError> {
+    fn parse_str_expr(&mut self, variables: &Vec<Variable>) -> Result<StrExpr, ParseError> {
         let tok = self.token.clone();
         match tok {
             Token::Str(s) => {
@@ -339,12 +343,12 @@ impl Parser {
     }
 
     // expr ::= additive
-    fn parse_num_expr(&mut self,variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
+    fn parse_num_expr(&mut self, variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
         self.parse_additive(variables)
     }
 
     // additive ::= multiplicative { ('+' | '-') multiplicative }
-    fn parse_additive(&mut self,variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
+    fn parse_additive(&mut self, variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
         let mut node = self.parse_multiplicative(variables)?;
         loop {
             let op = match &self.token {
@@ -368,9 +372,9 @@ impl Parser {
         Ok(node)
     }
 
-    // multiplicative ::= primary { ('*' | '/') primary }
-    fn parse_multiplicative(&mut self,variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
-        let mut node = self.parse_primary(variables)?;
+    // multiplicative ::= unary { ('*' | '/') unary }
+    fn parse_multiplicative(&mut self, variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
+        let mut node = self.parse_unary(variables)?;
         loop {
             let op = match &self.token {
                 Token::Star => {
@@ -383,7 +387,7 @@ impl Parser {
                 }
                 _ => break,
             };
-            let rhs = self.parse_primary(variables)?;
+            let rhs = self.parse_unary(variables)?;
             node = NumExpr::Binary {
                 op,
                 left: Box::new(node),
@@ -393,8 +397,33 @@ impl Parser {
         Ok(node)
     }
 
+    // unary ::= { '+' | '-' } primary
+    fn parse_unary(&mut self, variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
+        // Count/minimize leading signs; handle chains like - - + - x
+        let mut minus_count = 0usize;
+        loop {
+            match self.token {
+                Token::Minus => {
+                    self.next_token()?;
+                    minus_count ^= 1;
+                } // flip parity
+                Token::Plus => {
+                    self.next_token()?; /* unary + is a no-op */
+                }
+                _ => break,
+            }
+        }
+
+        let base = self.parse_primary(variables)?;
+        if minus_count % 2 == 1 {
+            Ok(NumExpr::Neg(Box::new(base)))
+        } else {
+            Ok(base)
+        }
+    }
+
     // primary ::= INT | FLOAT |'(' expr ')' | ident
-    fn parse_primary(&mut self,variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
+    fn parse_primary(&mut self, variables: &Vec<Variable>) -> Result<NumExpr, ParseError> {
         let tok = self.token.clone();
         match tok {
             Token::Integer(n) => {
@@ -420,7 +449,10 @@ impl Parser {
                     }
                 })?;
                 let var = variables[var_index].clone();
-                Ok(NumExpr::Var { var, pos: self.pos.clone() })
+                Ok(NumExpr::Var {
+                    var,
+                    pos: self.pos.clone(),
+                })
             }
             _ => Err(ParseError::Unexpected {
                 found: self.token.clone(),
