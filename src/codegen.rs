@@ -308,6 +308,7 @@ impl CodeGenerator {
         str_expr: &Vec<StrExpr>,
         instr: &mut wasm_encoder::InstructionSink<'_>,
         function: &ParserFunction,
+        nl: bool,
     ) -> Result<(), ParseError> {
         match str_expr.as_slice() {
             [] => {}
@@ -328,6 +329,22 @@ impl CodeGenerator {
                     instr.call(self.fn_map["concat"] as u32);
                 }
             }
+        }
+        if nl {
+            // append newline
+            let nl_blob = push_text(
+                &mut self.data,
+                0,
+                &mut self.data_idx,
+                "\n",
+                16,
+                &mut self.string_interner,
+            );
+            instr
+                .i32_const(nl_blob.ptr as i32)
+                .i32_const(nl_blob.len as i32);
+            // stack: ... s_ptr s_len nl_ptr nl_len -> concat -> s_ptr s_len
+            instr.call(self.fn_map["concat"] as u32);
         }
         instr.call(self.fn_map["log"] as u32);
         Ok(())
@@ -381,7 +398,8 @@ impl CodeGenerator {
 
         for stdm in &function.body {
             match stdm {
-                Stadment::Print(str_expr) => self.gen_print(str_expr, &mut instr, function)?,
+                Stadment::Print(str_expr) => self.gen_print(str_expr, &mut instr, function, false)?,
+                Stadment::Println(str_expr) => self.gen_print(str_expr, &mut instr, function, true)?,
                 Stadment::Call { name, pos } => {
                     if let Some(fid) = self.fn_map.get(name) {
                         instr.call(*fid as u32);

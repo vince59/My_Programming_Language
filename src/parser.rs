@@ -48,6 +48,7 @@ pub enum StrExpr {
 #[derive(Debug, Clone)]
 pub enum Stadment {
     Print(Vec<StrExpr>),
+    Println(Vec<StrExpr>),
     Call {
         name: String,
         pos: Position,
@@ -232,7 +233,8 @@ impl Parser {
     pub fn parse_stadment(&mut self, variables: &Vec<Variable>) -> Result<Stadment, ParseError> {
         match &self.token {
             Token::Call => self.parse_call_function(),
-            Token::Print => self.parse_print(variables),
+            Token::Print => self.parse_print(variables, false),
+            Token::Println => self.parse_print(variables, true),
             Token::Let => self.parse_assignment(variables),
             _ => Err(ParseError::Unexpected {
                 found: self.token.clone(),
@@ -301,9 +303,18 @@ impl Parser {
         Ok(Stadment::Assignment { var, expr, pos })
     }
 
-    // print ::=  PRINT '(' str_expr [',' str_expr] ')'
-    pub fn parse_print(&mut self, variables: &Vec<Variable>) -> Result<Stadment, ParseError> {
-        crate::expect!(self, Token::Print, grammar::KW_PRINT)?;
+    // print ::=  (PRINT | PRINTLN) '(' str_expr [',' str_expr] ')'
+    
+    pub fn parse_print(
+        &mut self,
+        variables: &Vec<Variable>,
+        nl: bool,
+    ) -> Result<Stadment, ParseError> {
+        if nl {
+            crate::expect!(self, Token::Println, grammar::KW_PRINTLN)?;
+        } else {
+            crate::expect!(self, Token::Print, grammar::KW_PRINT)?;
+        }
         crate::expect!(self, Token::LParen, grammar::LPAREN)?;
         let mut str_expr: Vec<StrExpr> = Vec::new();
         str_expr.push(self.parse_str_expr(variables)?);
@@ -312,7 +323,11 @@ impl Parser {
             str_expr.push(self.parse_str_expr(variables)?);
         }
         crate::expect!(self, Token::RParen, grammar::RPAREN)?;
-        Ok(Stadment::Print(str_expr))
+        if nl {
+            Ok(Stadment::Println(str_expr))
+        } else {
+            Ok(Stadment::Print(str_expr))
+        }
     }
 
     // str_expr ::= str | to_str(num_expr) | NL

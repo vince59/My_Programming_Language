@@ -352,6 +352,7 @@ impl Lexer {
                     grammar::KW_FN => Token::Fn,
                     grammar::KW_MAIN => Token::Main,
                     grammar::KW_PRINT => Token::Print,
+                    grammar::KW_PRINTLN => Token::Println,
                     grammar::KW_TO_STR => Token::ToStr,
                     grammar::KW_NL => Token::Nl,
                     grammar::KW_LOCAL => Token::Local,

@@ -8,6 +8,7 @@ pub enum Token {
     Fn,
     Main,
     Print,
+    Println,
     Call,
     Ident(String),
     Str(String),
@@ -38,6 +39,7 @@ pub const KW_IMPORT: &str = "import";
 pub const KW_FN: &str = "fn";
 pub const KW_MAIN: &str = "main";
 pub const KW_PRINT: &str = "print";
+pub const KW_PRINTLN: &str = "println";
 pub const KW_CALL: &str = "call";
 pub const KW_TO_STR: &str = "to_str";
 pub const KW_NL: &str = "nl";

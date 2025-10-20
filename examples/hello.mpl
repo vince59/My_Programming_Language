@@ -3,7 +3,6 @@ import "lib\unit.mpl"
 
 /*
 todo : 
-gestion des nombres négatifs
 gestion des booleen
 gestion des chaines
 */
@@ -28,6 +27,8 @@ main() {
   call hello_from_utils()
   print("x=", to_str((40+4)/(2*2.3)-5.5),nl)
   print("L1", nl, "L2",nl)
-  print("[","","]")
+  print("[","","]",nl)
+  println("a")
+  println("b")
 }
 
