@@ -1,12 +1,15 @@
-use crate::parser::{
-    BinOp, Expr, Function as ParserFunction, NumExpr, ParseError, Program, Stadment, StrExpr,
-    Variable,
+use crate::{
+    lexer::Position,
+    parser::{
+        BinOp, Expr, Function as ParserFunction, NumExpr, ParseError, Program, Stadment, StrExpr,
+        Variable,
+    },
 };
 
 use wasm_encoder::{
-    CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection, FunctionSection,
-    GlobalSection, GlobalType, ImportSection, IndirectNameMap, MemoryType, Module, NameMap,
-    NameSection, TypeSection, ValType,
+    BlockType, CodeSection, ConstExpr, DataSection, EntityType, ExportKind, ExportSection,
+    FunctionSection, GlobalSection, GlobalType, ImportSection, IndirectNameMap, Instruction,
+    MemoryType, Module, NameMap, NameSection, TypeSection, ValType,
 };
 
 use std::collections::HashMap;
@@ -15,6 +18,13 @@ use std::collections::HashMap;
 struct Blob {
     ptr: u32,
     len: u32,
+}
+
+struct FunctionContext {
+    fn_id: u32,
+    param_count: u32,
+    function: &ParserFunction,
+    instr: &mut wasm_encoder::InstructionSink<'_>,
 }
 
 #[inline]
@@ -31,7 +41,7 @@ fn align_up(x: u32, align: u32) -> u32 {
 /// - De-duplicates via `interner` (text -> Blob).
 /// - Respects `align`. If an existing entry for the same text does not meet the requested
 ///   alignment (`ptr % align != 0`), a new copy is emitted at a properly aligned address.
-pub fn push_text(
+fn push_text(
     data: &mut DataSection,
     mem_index: u32,
     cursor: &mut u32,
@@ -96,6 +106,23 @@ pub struct CodeGenerator {
     fn_map: HashMap<String, i32>,
     data_idx: u32,
     ty_void: u32,
+}
+
+fn get_variable_index(
+    variables: &Vec<Variable>,
+    name: &str,
+    pos: &Position,
+) -> Result<i32, ParseError> {
+    let idx = match crate::parser::find_variable_index(variables, name) {
+        Some(i) => i as u32,
+        None => {
+            return Err(ParseError::Generator {
+                pos: pos.clone(),
+                msg: format!("unknown variable '{}'", name),
+            });
+        }
+    };
+    Ok(idx as i32)
 }
 
 impl CodeGenerator {
@@ -354,15 +381,15 @@ impl CodeGenerator {
         &mut self,
         variables: &[Variable],
         fn_id: u32,
-        param_count: u32, // <- passe 0 si pas de paramètres
+        param_count: u32,
     ) -> Vec<(u32, ValType)> {
-        // 1) Prépare la map de noms pour cette fonction
+        // mapping local index -> name
         let mut fn_locals = NameMap::new();
 
-        // 2) Construit la liste des locals (en groupes (count, type))
+        // build locals section
         let mut locals: Vec<(u32, ValType)> = Vec::with_capacity(variables.len());
 
-        // index logique des locals dans la fonction = params d'abord, puis locals
+        // logical index = param_count + local_index
         let mut local_index = param_count;
 
         for var in variables {
@@ -375,12 +402,276 @@ impl CodeGenerator {
             local_index += 1;
         }
 
-        // 3) Ajoute ces noms à la NameSection
+        //  add local names for this function
         let mut local_names = IndirectNameMap::new();
         local_names.append(fn_id, &fn_locals);
         self.names.locals(&local_names);
 
         locals
+    }
+
+    pub fn gen_call_function(
+        &mut self,
+        name: &str,
+        instr: &mut wasm_encoder::InstructionSink<'_>,
+        pos: &Position,
+    ) -> Result<(), ParseError> {
+        if let Some(fid) = self.fn_map.get(name) {
+            instr.call(*fid as u32);
+            Ok(())
+        } else {
+            Err(ParseError::Generator {
+                pos: pos.clone(),
+                msg: format!("unknown function '{}'", name),
+            })
+        }
+    }
+
+    pub fn gen_assignment(
+        &mut self,
+        var: &Variable,
+        expr: &Expr,
+        instr: &mut wasm_encoder::InstructionSink<'_>,
+        function: &ParserFunction,
+        pos: &Position,
+    ) -> Result<(), ParseError> {
+        // generate expression
+        match &expr {
+            Expr::Num(num_expr) => {
+                self.gen_expression_as(&num_expr, instr, var.ty, function)?;
+            }
+            _ => {
+                return Err(ParseError::Generator {
+                    pos: pos.clone(),
+                    msg: "only numeric expressions are supported in assignments".to_string(),
+                });
+            }
+        }
+
+        let idx = get_variable_index(&function.variables, &var.name, pos)?;
+        // set local
+        instr.local_set(idx.try_into().unwrap());
+        Ok(())
+    }
+
+    pub fn gen_for_loop(
+        &mut self,
+        var: &Variable,
+        start: &Expr,
+        end: &Expr,
+        step: Option<&Expr>,
+        body: &Vec<Stadment>,
+        instr: &mut wasm_encoder::InstructionSink<'_>,
+        function: &ParserFunction,
+        fnc: &mut wasm_encoder::Function,
+        pos: &Position,
+    ) -> Result<(), ParseError> {
+        // --- i = start ---
+        match start {
+            Expr::Num(num_expr) => {
+                self.gen_expression_as(&num_expr, instr, var.ty, function)?;
+            }
+            _ => {
+                return Err(ParseError::Generator {
+                    pos: pos.clone(),
+                    msg: "only numeric expressions are supported in for loop start".to_string(),
+                });
+            }
+        }
+        let var_idx = get_variable_index(&function.variables, &var.name, pos)? as u32;
+        instr.local_set(var_idx); // i
+
+        // --- end ---
+        match end {
+            Expr::Num(num_expr) => {
+                self.gen_expression_as(&num_expr, instr, var.ty, function)?;
+            }
+            _ => {
+                return Err(ParseError::Generator {
+                    pos: pos.clone(),
+                    msg: "only numeric expressions are supported in for loop end".to_string(),
+                });
+            }
+        }
+
+        let var_idx = function.variables.len() as u32; // next free local index 
+        locals.push((1, ValType::I32));
+        instr.local_set(var_idx + 1); // end
+        let fn_id = self.fn_map[&function.name] as u32;
+        let mut local_names = IndirectNameMap::new();
+        local_names.append(fn_id, &fn_locals);
+        self.names.locals(&local_names);
+
+        // --- step (par défaut = 1) ---
+        if let Some(step_expr) = step {
+            match step_expr {
+                Expr::Num(num_expr) => {
+                    self.gen_expression_as(&num_expr, instr, var.ty, function)?;
+                }
+                _ => {
+                    return Err(ParseError::Generator {
+                        pos: pos.clone(),
+                        msg: "only numeric expressions are supported in for loop step".to_string(),
+                    });
+                }
+            }
+            instr.local_set(var_idx + 2); // step
+        } else {
+            instr.i32_const(1);
+            instr.local_set(var_idx + 2); // step = 1
+        }
+
+        // ------------------------------------------------------------------
+        //  block $exit
+        //    loop $loop
+        //      if (step > 0) { if (i > end) break; } else { if (i < end) break; }
+        //      ...body...
+        //      i += step
+        //      br $loop
+        //    end
+        //  end
+        // ------------------------------------------------------------------
+
+        // block $exit
+        instr.block(BlockType::Empty);
+        // loop $loop
+        instr.loop_(BlockType::Empty);
+
+        // step > 0 ?
+        instr.local_get(var_idx + 2);
+        instr.i32_const(0);
+        instr.i32_gt_s();
+        instr.if_(BlockType::Empty);
+        {
+            // --- branche step > 0 : sortir si i > end ---
+            instr.local_get(var_idx); // i
+            instr.local_get(var_idx + 1); // end
+            instr.i32_gt_s();
+            // br_if depth=1 => saute le 'loop' et va au 'block' (break)
+            instr.br_if(1);
+        }
+        instr.else_();
+        {
+            // --- branche step <= 0 : sortir si i < end ---
+            instr.local_get(var_idx); // i
+            instr.local_get(var_idx + 1); // end
+            instr.i32_lt_s();
+            instr.br_if(1); // br_if depth=1 => saute le 'loop' et va au 'block' (break)
+        }
+        instr.end(); // fin du if
+
+        // --- body ---
+        self.gen_statements(body, instr, function, fnc)?;
+
+        // --- i = i + step ---
+        instr.local_get(var_idx);
+        instr.local_get(var_idx + 2);
+        instr.i32_add();
+        instr.local_set(var_idx);
+
+        // br $loop
+        instr.br(0);
+
+        // end loop, end block
+        instr.end();
+        instr.end();
+
+        Ok(())
+    }
+
+    pub fn gen_statements(
+        &mut self,
+        statements: &Vec<Stadment>,
+        instr: &mut wasm_encoder::InstructionSink<'_>,
+        function: &ParserFunction,
+        fnc: &mut wasm_encoder::Function,
+    ) -> Result<(), ParseError> {
+        for st in statements {
+            self.gen_statement(st, instr, function, fnc)?;
+        }
+        Ok(())
+    }
+
+    pub fn gen_statement(
+        &mut self,
+        stdm: &Stadment,
+        instr: &mut wasm_encoder::InstructionSink<'_>,
+        function: &ParserFunction,
+        fnc: &mut wasm_encoder::Function,
+    ) -> Result<(), ParseError> {
+        match stdm {
+            Stadment::Print(str_expr) => self.gen_print(str_expr, instr, function, false)?,
+            Stadment::Println(str_expr) => self.gen_print(str_expr, instr, function, true)?,
+            Stadment::Call { name, pos } => self.gen_call_function(name, instr, pos)?,
+            Stadment::Assignment { var, expr, pos } => {
+                self.gen_assignment(var, expr, instr, function, pos)?
+            }
+            Stadment::ForLoop {
+                var,
+                start,
+                end,
+                step,
+                body,
+                pos,
+            } => {
+                self.gen_for_loop(
+                    var,
+                    start,
+                    end,
+                    step.as_ref(),
+                    body,
+                    instr,
+                    function,
+                    fnc,
+                    pos,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_tmp_locals(
+        &mut self,
+        statements: &[Stadment], // ← &[] plutôt que &Vec
+        start_index: u32,
+        fn_id: u32,
+    ) -> Vec<(u32, ValType)> {
+        use wasm_encoder::{IndirectNameMap, NameMap, ValType};
+
+        let mut fn_locals = NameMap::new();
+
+        // index logique courant (params + locales déjà allouées avant ces temporaires)
+        let mut local_index = start_index;
+
+        // on ne crée qu’un seul groupe (count, ValType::I32) à la fin
+        let mut tmp_i32_count: u32 = 0;
+
+        for st in statements {
+            if let Stadment::ForLoop { .. } = st {
+                // Deux temporaires i32 par for: end et step
+                tmp_i32_count += 2;
+
+                // Noms lisibles pour chaque local alloué
+                local_index += 1;
+                fn_locals.append(local_index, &format!("_for_end_{}", local_index));
+                local_index += 1;
+                fn_locals.append(local_index, &format!("_for_step_{}", local_index));
+            }
+        }
+
+        // Ajoute les noms de locaux à la section Name (si besoin)
+        if tmp_i32_count > 0 {
+            let mut local_names = IndirectNameMap::new();
+            local_names.append(fn_id, &fn_locals);
+            self.names.locals(&local_names);
+        }
+
+        // Retour direct: un seul groupe I32 si nécessaire, sans recopie
+        if tmp_i32_count > 0 {
+            vec![(tmp_i32_count, ValType::I32)]
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn gen_function(&mut self, function: &ParserFunction) -> Result<(), ParseError> {
@@ -391,63 +682,21 @@ impl CodeGenerator {
         // si ta fonction n'a pas de paramètres :
         let param_count = 0;
 
-        let locals = self.gen_variables(&function.variables, fn_id, param_count);
+        let mut locals = self.gen_variables(&function.variables, fn_id, param_count);
+        locals.append(&mut  self.get_tmp_locals(&function.body, locals.len() as u32, fn_id));
 
         let mut fnc = wasm_encoder::Function::new(locals);
+
         let mut instr = fnc.instructions();
 
-        for stdm in &function.body {
-            match stdm {
-                Stadment::Print(str_expr) => self.gen_print(str_expr, &mut instr, function, false)?,
-                Stadment::Println(str_expr) => self.gen_print(str_expr, &mut instr, function, true)?,
-                Stadment::Call { name, pos } => {
-                    if let Some(fid) = self.fn_map.get(name) {
-                        instr.call(*fid as u32);
-                    } else {
-                        return Err(ParseError::Generator {
-                            pos: pos.clone(),
-                            msg: format!("unknown function '{}'", name),
-                        });
-                    }
-                }
-                Stadment::Assignment { var, expr, pos } => {
-                    // generate expression
-                    match &expr {
-                        Expr::Num(num_expr) => {
-                            self.gen_expression_as(&num_expr, &mut instr, var.ty, function)?;
-                        }
-                        _ => {
-                            return Err(ParseError::Generator {
-                                pos: pos.clone(),
-                                msg: "only numeric expressions are supported in assignments"
-                                    .to_string(),
-                            });
-                        }
-                    }
-
-                    // find local index
-                    let idx =
-                        match crate::parser::find_variable_index(&function.variables, &var.name) {
-                            Some(i) => i as u32,
-                            None => {
-                                return Err(ParseError::Generator {
-                                    pos: pos.clone(),
-                                    msg: format!("unknown variable '{}'", var.name),
-                                });
-                            }
-                        };
-                    // set local
-                    instr.local_set(idx);
-                }
-            }
-        }
+        self.gen_statements(&function.body, &mut instr, function, &mut fnc)?;
 
         instr.end();
         self.code.function(&fnc);
         Ok(())
     }
 
-    // Déclare une fonction importée (module, name, (params)->(results))
+    // Define an imported function (module, name, (params)->(results))
     pub fn push_imported_function(
         &mut self,
         module: &str,

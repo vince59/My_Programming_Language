@@ -3,6 +3,14 @@ import "lib\unit.mpl"
 
 /*
 todo : 
+boucle for
+
+for i = 1 to 10 step 1 
+  println(i)
+  break
+next
+
+
 gestion des booleen
 gestion des chaines
 */
@@ -30,5 +38,10 @@ main() {
   print("[","","]",nl)
   println("a")
   println("b")
+
+  for i = 1 to 10 step 1 
+    println(to_str(i))
+  next
+
 }
 

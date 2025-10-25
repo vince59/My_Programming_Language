@@ -32,6 +32,11 @@ pub enum Token {
     IntType,
     FloatType,
     Let,
+    For,
+    To,
+    Step,
+    Next,
+    Break,
     Eof,
 }
 
@@ -49,6 +54,11 @@ pub const KW_FALSE: &str = "false";
 pub const KW_INT_TYPE: &str = "int";
 pub const KW_FLOAT_TYPE: &str = "float";
 pub const KW_LET: &str = "let";
+pub const KW_FOR: &str = "for";
+pub const KW_TO: &str = "to";
+pub const KW_STEP: &str = "step";   
+pub const KW_NEXT: &str = "next";
+pub const KW_BREAK: &str = "break";
 
 pub const LPAREN: &str = "(";
 pub const RPAREN: &str = ")";

@@ -5,10 +5,10 @@
 // Main entry point for MPL CLI
 // All comments are in English per requirement.
 
+mod codegen;
+mod grammar;
 mod lexer;
 mod parser;
-mod grammar;
-mod codegen;
 mod runner;
 
 use clap::{Arg, ArgAction, ArgGroup, Command};
@@ -20,6 +20,7 @@ use std::{
     path::{Path, PathBuf},
     process,
 };
+use wasmprinter::{Config, PrintFmtWrite};
 
 fn resolve_rel(base_file: &Path, rel: &str) -> PathBuf {
     // Resolve a relative path against the base file directory.
@@ -103,7 +104,7 @@ fn build_cli() -> Command {
                 .required(true),
         )
         .after_help(
-"EXAMPLES:
+            "EXAMPLES:
   mpl -c main.mpl                 Compile to main.wasm
   mpl -c main.mpl -o out.wasm     Compile to out.wasm
   mpl -c main.mpl -a              Also emit main.wat
@@ -115,7 +116,6 @@ RULES:
   -c, -r, -rw are mutually exclusive (pick exactly one).",
         )
 }
-
 
 fn main() {
     if let Err(e) = real_main() {
@@ -132,9 +132,7 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
     let run_mode = matches.get_flag("run");
     let runwasm_arg = matches.get_one::<String>("runwasm").cloned();
 
-    let input_path: Option<PathBuf> = matches
-        .get_one::<String>("input")
-        .map(|s| PathBuf::from(s));
+    let input_path: Option<PathBuf> = matches.get_one::<String>("input").map(|s| PathBuf::from(s));
 
     // Validate mode-specific requirements
     if compile_mode || run_mode {
@@ -195,8 +193,14 @@ fn real_main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 src_file.with_extension("wat")
             };
-            let wat = wasmprinter::print_bytes(&wasm).expect("WAT print failed");
-            fs::write(&wat_out, wat)?;
+            let mut cfg = Config::new();
+            cfg.print_offsets(true).name_unnamed(true); // commentaires ";; offset: 0x..."
+
+            let mut out = String::new();
+            let mut sink = PrintFmtWrite(&mut out); // <-- pas de ::new
+            cfg.print(&wasm, &mut sink).unwrap();
+            //let wat = wasmprinter::print_bytes(&wasm).expect("WAT print failed");
+            fs::write(&wat_out, out)?;
         }
 
         // Optional: print program debug (as in your original main)

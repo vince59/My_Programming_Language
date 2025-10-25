@@ -58,6 +58,14 @@ pub enum Stadment {
         expr: Expr,
         pos: Position,
     },
+    ForLoop {
+        var: Variable,
+        start: Expr,
+        end: Expr,
+        step: Option<Expr>,
+        body: Vec<Stadment>,
+        pos: Position,
+    },
 }
 
 #[derive(Debug)]
@@ -81,6 +89,14 @@ pub struct Variable {
 
 pub fn find_variable_index(variables: &[Variable], name: &str) -> Option<usize> {
     variables.iter().position(|v| v.name == name)
+}
+
+pub fn get_variable(variables: &Vec<Variable>, name: &str) -> Variable {
+    variables
+        .iter()
+        .find(|v| v.name == name)
+        .expect(&format!("Variable '{}' not declared", name))
+        .clone()
 }
 
 #[derive(Debug)]
@@ -236,6 +252,7 @@ impl Parser {
             Token::Print => self.parse_print(variables, false),
             Token::Println => self.parse_print(variables, true),
             Token::Let => self.parse_assignment(variables),
+            Token::For => self.parse_for_loop(variables),
             _ => Err(ParseError::Unexpected {
                 found: self.token.clone(),
                 expected: "an instruction",
@@ -243,6 +260,30 @@ impl Parser {
             }),
         }
     }
+
+    // for_loop ::= FOR ident '=' expr TO expr [ STEP expr ] [ { stadment } ] NEXT
+    pub fn parse_for_loop(&mut self, variables: &Vec<Variable>) -> Result<Stadment, ParseError> {
+        crate::expect!(self, Token::For, grammar::KW_FOR)?;
+        let (var_name, pos) =
+            crate::expect!(self, Token::Ident(s) => s, "a valid variable name after `for`")?;
+        crate::expect!(self, Token::Equal, grammar::EQUAL)?;
+        let start = self.parse_expr(variables)?;
+        crate::expect!(self, Token::To, grammar::KW_TO)?;
+        let end = self.parse_expr(variables)?;
+        let step = if matches!(self.token, Token::Step) {
+            self.next_token()?;
+            Some(self.parse_expr(variables)?)
+        } else {
+            None
+        };
+        let mut body = Vec::new();
+        while !matches!(self.token, Token::Next) {
+            body.push(self.parse_stadment(variables)?);
+        }
+        crate::expect!(self, Token::Next, grammar::KW_NEXT)?;
+        let var = get_variable(variables, &var_name);
+        Ok(Stadment::ForLoop {var,start,end,step,body,pos})
+    }   
 
     // main_function ::=  MAIN '(' ')' '{'
     //                        [ { variable_declaration } ]
@@ -305,11 +346,7 @@ impl Parser {
 
     // print ::=  (PRINT | PRINTLN) '(' str_expr [',' str_expr] ')'
     
-    pub fn parse_print(
-        &mut self,
-        variables: &Vec<Variable>,
-        nl: bool,
-    ) -> Result<Stadment, ParseError> {
+    pub fn parse_print(&mut self,variables: &Vec<Variable>,nl: bool) -> Result<Stadment, ParseError> {
         if nl {
             crate::expect!(self, Token::Println, grammar::KW_PRINTLN)?;
         } else {
@@ -457,13 +494,7 @@ impl Parser {
             }
             Token::Ident(ref var_name) => {
                 self.next_token()?;
-                let var_index = find_variable_index(variables, &var_name).ok_or_else(|| {
-                    ParseError::Generator {
-                        pos: self.pos.clone(),
-                        msg: format!("Variable '{}' not declared", var_name),
-                    }
-                })?;
-                let var = variables[var_index].clone();
+                let var = get_variable(variables, var_name);
                 Ok(NumExpr::Var {
                     var,
                     pos: self.pos.clone(),

@@ -361,6 +361,11 @@ impl Lexer {
                     grammar::KW_INT_TYPE => Token::IntType,
                     grammar::KW_FLOAT_TYPE => Token::FloatType,
                     grammar::KW_LET => Token::Let,
+                    grammar::KW_FOR => Token::For,
+                    grammar::KW_TO => Token::To,
+                    grammar::KW_STEP => Token::Step,
+                    grammar::KW_NEXT => Token::Next,
+                    grammar::KW_BREAK => Token::Break,
                     // otherwise, plain identifier
                     _ => Token::Ident(id.to_string()),
                 };
